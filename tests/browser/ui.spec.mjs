@@ -290,3 +290,25 @@ test("privacy: deleting current account history removes only its IndexedDB recor
   await page.reload();
   await expect(page.getByText("MOCK_REPLY:Alice must remain")).toBeVisible();
 });
+
+
+test("privacy: switching accounts and logout discard the previous user's unsent draft", async ({ page, context }) => {
+  const state = { user: alice, sent: [] };
+  await mockNetwork(context, state);
+  await page.goto("/");
+  await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await page.getByRole("textbox", { name: "메시지" }).fill("Alice unsent confidential draft");
+
+  state.user = bob;
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(page.getByRole("link", { name: "Google로 로그인" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "메시지" })).toHaveValue("");
+  await page.reload();
+  await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "메시지" })).toHaveValue("");
+
+  await page.getByRole("textbox", { name: "메시지" }).fill("Bob unsent draft");
+  await page.getByRole("button", { name: "로그아웃" }).click();
+  await expect(page.getByRole("link", { name: "Google로 로그인" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "메시지" })).toHaveValue("");
+});
