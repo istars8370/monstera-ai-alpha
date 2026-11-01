@@ -44,8 +44,12 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Generate migration from five-table schema
         run: pnpm exec drizzle-kit generate --config=drizzle.config.ts
-      - name: Apply only to disposable Postgres service
-        run: pnpm exec drizzle-kit migrate --config=drizzle.config.ts
+      - name: Apply generated SQL to disposable PostgreSQL
+        run: |
+          set -eu
+          for migration in db/migrations/*.sql; do
+            docker run --rm -i --network host -e PGPASSWORD=ephemeral_only postgres:16 psql -h 127.0.0.1 -U integration_user -d monstera_integration -v ON_ERROR_STOP=1 < "$migration"
+          done
       - name: Check table count, constraints and rollback
         run: |
           set -eu
