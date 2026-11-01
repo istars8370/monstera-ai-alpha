@@ -88,6 +88,11 @@ export async function POST(request: NextRequest): Promise<Response> {
   try { user = await authenticatedUser(request); }
   catch { return Response.json({ code: "AUTH_UNAVAILABLE" }, { status: 503 }); }
   if (!user) return Response.json({ code: "UNAUTHORIZED" }, { status: 401 });
+  // Detect stale tabs after another Google account signs in; this header never grants access.
+  const expectedUserId = request.headers.get("x-monstera-expected-user");
+  if (expectedUserId && expectedUserId !== user.id) {
+    return Response.json({ code: "SESSION_CHANGED" }, { status: 409 });
+  }
 
   let parsed: ParsedChat;
   try { parsed = parseRequest(await limitedJson(request)); }
