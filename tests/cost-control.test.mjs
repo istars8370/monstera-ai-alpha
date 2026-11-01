@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { approvedFreeModels, reserveAlphaRequest, ALPHA_BUDGET_LUA } from "../lib/alpha-cost-control.ts";
+import { approvedFreeModels, reserveAlphaRequest, reserveEstimatedDailyBudget, ALPHA_BUDGET_LUA, ESTIMATED_SPEND_LUA } from "../lib/alpha-cost-control.ts";
 
 const alice = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const bob = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -49,4 +49,29 @@ test("alpha budget fails closed on invalid configuration or upstream error", asy
   await assert.rejects(reserveAlphaRequest("not-a-valid-uuid", "10", noCall, instant), /ALPHA_BUDGET_NOT_CONFIGURED/);
   await assert.rejects(reserveAlphaRequest(alice, "10", async () => "broken", instant), /ALPHA_BUDGET_UNAVAILABLE/);
   await assert.rejects(reserveAlphaRequest(alice, "10", async () => { throw new Error("redis offline"); }, instant), /redis offline/);
+});
+
+
+test("estimated spend Lua reserves synthetic micro-USD atomically and rejects daily overflow", async () => {
+  const spentByKey = new Map();
+  const evalMock = async (script, keys, args) => {
+    assert.equal(script, ESTIMATED_SPEND_LUA);
+    const current = spentByKey.get(keys[0]) ?? 0;
+    const [amount, cap] = args.map(Number);
+    if (amount > cap || current > cap - amount) return 1;
+    spentByKey.set(keys[0], current + amount);
+    return 0;
+  };
+  const ns = "monstera:staging-demo";
+  assert.equal(await reserveEstimatedDailyBudget(ns, "100", 60, evalMock, instant), "reserved_estimate");
+  assert.equal(await reserveEstimatedDailyBudget(ns, "100", 40, evalMock, instant), "reserved_estimate");
+  assert.equal(await reserveEstimatedDailyBudget(ns, "100", 1, evalMock, instant), "daily_estimate_limit");
+  assert.equal([...spentByKey.values()][0], 100);
+  for (const [prefix, max, cost] of [
+    ["", "100", 1], [ns, undefined, 1], [ns, "0", 1], [ns, "1000000001", 1],
+    [ns, "100", -1], [ns, "100", NaN], [ns, "100", 0.5],
+  ]) {
+    await assert.rejects(reserveEstimatedDailyBudget(prefix, max, cost, evalMock, instant),
+      /ESTIMATED_SPEND_LIMIT_NOT_CONFIGURED/);
+  }
 });

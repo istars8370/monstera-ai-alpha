@@ -6,6 +6,13 @@ export class Redis {
   constructor() {}
   async eval(script, keys, args) {
     if (state.failure) throw new Error("OFFLINE_REDIS_MOCK");
+    if (keys.length === 1 && args.length === 2 && script.includes("INCRBY")) {
+      const amount = Number(args[0]), cap = Number(args[1]);
+      const spent = state.counts.get(keys[0]) ?? 0;
+      if (amount > cap || spent > cap - amount) return 1;
+      state.counts.set(keys[0], spent + amount);
+      return 0;
+    }
     if (!script.includes("INCR") || keys.length !== 2 || args.length !== 2) {
       throw new Error("UNEXPECTED_REDIS_MOCK_SCRIPT");
     }

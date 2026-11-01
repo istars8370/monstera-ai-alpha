@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  estimateProviderMaximumCost, estimateRouteMaximumCost, withinSimulatedBudget,
+  estimateProviderMaximumCost, estimateRouteMaximumCost, withinSimulatedBudget, matchingReviewedProviderPrices,
 } from "../lib/provider-cost-policy.ts";
 
 const now = new Date("2026-11-02T00:00:00.000Z");
@@ -57,4 +57,23 @@ test("estimated model exposure never claims actual provider-side hard limits", (
   assert.equal(exposure.providerHardLimitVerified, false);
   assert.equal(withinSimulatedBudget(exposure, 1224, 1224), true);
   assert.equal(withinSimulatedBudget(exposure, 1223, 1224), false);
+});
+
+
+test("selected upstream prices require a reviewed exact-match manifest, never the local registry zero", () => {
+  const manifest = JSON.stringify([
+    { ...primary, inputTokenCeiling: 25000, outputTokenCeiling: 1024 },
+  ]);
+  const models = [{ provider: "openrouter", upstream_id: "mock/model" }];
+  assert.equal(matchingReviewedProviderPrices(manifest, models, now)[0].model, "mock/model");
+  assert.throws(() => matchingReviewedProviderPrices(undefined, models, now), /PROVIDER_PRICE_POLICY_NOT_CONFIGURED/);
+  assert.throws(() => matchingReviewedProviderPrices(manifest, [
+    { provider: "deepinfra", upstream_id: "mock/other" },
+  ], now), /PROVIDER_PRICE_MISSING_OR_DUPLICATE/);
+  assert.throws(() => matchingReviewedProviderPrices(JSON.stringify([JSON.parse(manifest)[0], JSON.parse(manifest)[0]]),
+    models, now), /PROVIDER_PRICE_MISSING_OR_DUPLICATE/);
+  assert.throws(() => matchingReviewedProviderPrices(manifest, models,
+    new Date("2026-12-01T00:00:00Z")), /PROVIDER_PRICE_REVIEW_REQUIRED/);
+  assert.throws(() => matchingReviewedProviderPrices(JSON.stringify([primary]), models, now),
+    /PROVIDER_PRICE_CEILING_TOO_LOW/);
 });

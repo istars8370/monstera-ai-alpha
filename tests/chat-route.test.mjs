@@ -46,6 +46,18 @@ beforeEach(() => {
   process.env.UPSTASH_REDIS_REST_URL = "https://no-network.invalid";
   process.env.UPSTASH_REDIS_REST_TOKEN = "fake-no-network-redis";
   process.env.MONSTERA_ALPHA_DAILY_REQUEST_CAP = "100";
+  process.env.MONSTERA_REDIS_NAMESPACE = "monstera:unit-alpha";
+  process.env.MONSTERA_PROVIDER_SPENDING_LIMIT_CONFIRMED = "true"; // CI mock, not an actual provider budget
+  process.env.MONSTERA_ALPHA_ESTIMATED_MICRO_USD_PER_DAY = "1000000";
+  process.env.MONSTERA_ALPHA_PROVIDER_PRICES_JSON = JSON.stringify([
+    { provider: "openrouter", model: "mock/free", inputMicroUsdPerMillion: 200000,
+      outputMicroUsdPerMillion: 1000000, inputTokenCeiling: 25000,
+      outputTokenCeiling: 1024, reviewedAt: new Date().toISOString() },
+    { provider: "deepinfra", model: "mock/creator", inputMicroUsdPerMillion: 300000,
+      outputMicroUsdPerMillion: 1000000, inputTokenCeiling: 25000,
+      outputTokenCeiling: 1024, reviewedAt: new Date().toISOString() },
+  ]);
+
   process.env.MONSTERA_ALPHA_APPROVED_MODELS = "openrouter:mock/free,deepinfra:mock/creator,openrouter:mock/paid";
   resetTestDb();
   resetTestRedis();
@@ -194,4 +206,27 @@ test("route: excessive provider output is terminated without emitting a successf
   assert.match(output, /CHAT_RESPONSE_TOO_LARGE/);
   assert.doesNotMatch(output, /event: done/);
   assert.ok(output.length < 160000);
+});
+
+
+test("route: missing provider monetary approval and missing reviewed prices cannot call upstream", async () => {
+  delete process.env.MONSTERA_PROVIDER_SPENDING_LIMIT_CONFIRMED;
+  const unsafe = await chat(request("/api/chat", alice, "POST", { modelId: free, messages: userMessage }));
+  assert.equal(unsafe.status, 503);
+  assert.equal((await unsafe.json()).code, "CHAT_UNAVAILABLE");
+  process.env.MONSTERA_PROVIDER_SPENDING_LIMIT_CONFIRMED = "true";
+  delete process.env.MONSTERA_ALPHA_PROVIDER_PRICES_JSON;
+  const unknownPrice = await chat(request("/api/chat", alice, "POST", { modelId: free, messages: userMessage }));
+  assert.equal(unknownPrice.status, 503);
+  assert.equal(providerCalls.length, 0);
+});
+
+test("route: simulated daily USD micro cap prevents dispatching expensive alpha requests", async () => {
+  process.env.MONSTERA_ALPHA_ESTIMATED_MICRO_USD_PER_DAY = "100";
+  const expensive = await chat(request("/api/chat", alice, "POST", {
+    modelId: free, messages: userMessage,
+  }));
+  assert.equal(expensive.status, 429);
+  assert.equal((await expensive.json()).code, "ESTIMATED_BUDGET_EXCEEDED");
+  assert.equal(providerCalls.length, 0);
 });
