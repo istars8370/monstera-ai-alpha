@@ -140,3 +140,53 @@ jobs:
           node-version: '22'
       - name: Test atomic Lua request caps without Upstash credentials
         run: node --experimental-transform-types --test tests/redis-smoke.mjs
+
+
+  browser-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    permissions:
+      contents: read
+    env:
+      ALPHA_BASIC_USER: ci-alpha
+      ALPHA_BASIC_PASSWORD: ci-only-alpha-password-not-a-real-secret
+      GOOGLE_CLIENT_ID: ci-client-id
+      GOOGLE_CLIENT_SECRET: ci-placeholder-not-a-secret
+      MONSTERA_PUBLIC_ORIGIN: http://127.0.0.1:3307
+      MONSTERA_TEST_HTTP_ORIGIN: http://127.0.0.1:3307
+      MONSTERA_SESSION_SECRET: ci-only-signing-key-do-not-use-for-real-sessions
+      MONSTERA_FREE_CHAT_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install isolated Chromium headless shell
+        run: pnpm exec playwright install --with-deps --only-shell chromium
+      - run: pnpm build
+      - name: Exercise real browser and mocked external API boundaries
+        run: |
+          set -euo pipefail
+          pnpm exec next start --hostname 127.0.0.1 --port 3307 > /tmp/monstera-browser.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          READY=0
+          for attempt in $(seq 1 25); do
+            if curl -fsS http://127.0.0.1:3307/api/health > /dev/null; then READY=1; break; fi
+            sleep 1
+          done
+          if [ "$READY" -ne 1 ]; then cat /tmp/monstera-browser.log; exit 1; fi
+          pnpm exec playwright test --config=playwright.config.mjs
+      - name: Retain failing browser traces only
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: monstera-browser-traces
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 3
