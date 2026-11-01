@@ -4,15 +4,11 @@ import { parseSse } from "../lib/providers/openrouter.ts";
 
 test("SSE parser handles CRLF split between network chunks", async () => {
   const chunks = [
-    'data: {"choices":[{"delta":{"content":"hello"}}]}',
-    '
-',
-    '
-data: [DONE]',
-    '
-',
-    '
-',
+    'data: {"choices":[{"delta":{"content":"hello"}}]}\r',
+    '\n\r',
+    '\ndata: [DONE]\r',
+    '\n\r',
+    '\n',
   ];
   const stream = new ReadableStream({
     start(controller) {
