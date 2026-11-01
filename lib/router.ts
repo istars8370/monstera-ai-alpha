@@ -9,6 +9,20 @@ export class RouterError extends Error {
 }
 const tierRank: Record<Tier, number> = { free: 0, creator: 1, studio: 2 };
 
+// A provider adapter must not be able to hang the request indefinitely by ignoring AbortSignal.
+async function nextUntilAbort<T>(iterator: AsyncIterator<T>, signal: AbortSignal): Promise<IteratorResult<T>> {
+  if (signal.aborted) throw new Error("UPSTREAM_ABORTED");
+  return new Promise<IteratorResult<T>>((resolve, reject) => {
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => { cleanup(); reject(new Error("UPSTREAM_ABORTED")); };
+    signal.addEventListener("abort", onAbort, { once: true });
+    Promise.resolve().then(() => iterator.next()).then(
+      result => { cleanup(); resolve(result); },
+      error => { cleanup(); reject(error); },
+    );
+  });
+}
+
 // 응답이 시작된 이후에는 다른 모델의 응답과 섞지 않는다.
 export class ModelRouter {
   constructor(private readonly registry: RegistryReader, private readonly adapters: Readonly<Record<string, ProviderAdapter>>, private readonly timeoutMs = 8000) {}
@@ -38,13 +52,13 @@ export class ModelRouter {
       const iterator = this.adapters[model.provider].chatStream({ model: model.upstreamId, messages: req.messages, signal: controller.signal })[Symbol.asyncIterator]();
       let committed = false;
       try {
-        const first = await iterator.next();
+        const first = await nextUntilAbort(iterator, controller.signal);
         clearTimeout(timer);
         if (first.done) throw new Error("EMPTY_STREAM");
         committed = true;
         yield first.value;
         while (true) {
-          const next = await iterator.next();
+          const next = await nextUntilAbort(iterator, controller.signal);
           if (next.done) return;
           yield next.value;
         }
@@ -55,7 +69,8 @@ export class ModelRouter {
         clearTimeout(timer);
         controller.abort();
         req.signal?.removeEventListener("abort", onAbort);
-        await iterator.return?.().catch(() => undefined);
+        // Never wait for a stalled adapter's return() after its signal has been aborted.
+        try { void iterator.return?.().catch(() => undefined); } catch { /* disposal is best effort */ }
       }
     }
   }
