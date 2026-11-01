@@ -1,0 +1,42 @@
+name: One-time pinned Playwright dependency
+on:
+  push:
+    branches: [integration/t1-t12]
+    paths: [.github/workflows/browser-deps.yml]
+permissions:
+  contents: write
+jobs:
+  lock-browser-test:
+    if: github.repository == 'istars8370/monstera-ai-alpha' && github.ref == 'refs/heads/integration/t1-t12'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - name: Add pinned browser E2E dev dependency
+        run: pnpm add --save-dev --save-exact '@playwright/test@1.64.1'
+      - name: Verify frozen lockfile and existing tests
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          pnpm lint
+          pnpm test
+          pnpm build
+      - name: Commit package and lockfile only on integration branch
+        run: |
+          git add -- package.json pnpm-lock.yaml
+          if git diff --cached --quiet; then
+            echo 'Playwright dependency already matches lockfile.'
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "test(browser): pin Playwright E2E dependency and frozen lockfile"
+          git push origin HEAD:integration/t1-t12
