@@ -50,7 +50,7 @@ export async function verifyGoogleIdToken(
     !!key && typeof key === "object" && "kid" in key &&
     key.kid === header.kid && "kty" in key && key.kty === "RSA" &&
     "use" in key && key.use === "sig" && "n" in key && "e" in key,
-  ) as JsonWebKey | undefined;
+  ) as import("node:crypto").JsonWebKey | undefined;
   if (!jwk) throw new Error("UNKNOWN_SIGNING_KEY");
   let authentic: boolean;
   try {
