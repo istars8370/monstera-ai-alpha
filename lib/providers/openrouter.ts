@@ -12,7 +12,9 @@ export async function* parseSse(response: Response, signal?: AbortSignal): Async
       if (signal?.aborted) throw new Error("UPSTREAM_ABORTED");
       const { done, value } = await reader.read();
       if (done) break;
-      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+      // 청크 경계에서 CRLF가 분리되어도 SSE 구분자를 정확히 인식한다.
+      buffer += decoder.decode(value, { stream: true });
+      buffer = buffer.replace(/\r\n/g, "\n");
       let boundary: number;
       while ((boundary = buffer.indexOf("\n\n")) >= 0) {
         const event = buffer.slice(0, boundary);
