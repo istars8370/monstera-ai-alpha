@@ -14,6 +14,7 @@ test("provider allowlist must match exact enabled zero-priced upstream models", 
   assert.equal(approvedFreeModels([a], [alice, bob], "openrouter:model/alpha"), false);
   assert.equal(approvedFreeModels([a, b], [alice, bob], "openrouter:model/alpha"), false);
   assert.equal(approvedFreeModels([a, b], [alice, bob], "deepinfra:model/beta, openrouter:model/alpha"), true);
+  assert.equal(approvedFreeModels([a, a], [alice, bob], "openrouter:model/alpha"), false);
   assert.equal(approvedFreeModels([{ ...a, price_out: "0.0000000001" }], [alice], "openrouter:model/alpha"), false);
   assert.equal(approvedFreeModels([{ ...a, price_in: "NaN" }], [alice], "openrouter:model/alpha"), false);
   assert.equal(approvedFreeModels([{ ...a, provider: "other" }], [alice], "openrouter:model/alpha"), false);
