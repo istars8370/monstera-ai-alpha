@@ -16,6 +16,8 @@ test("database preflight permits isolated test URLs and enforces TLS in producti
   assert.equal(validateDatabaseUrl("postgresql://demo:secret@example.neon.tech/db?sslmode=require", true),
     "postgresql://demo:secret@example.neon.tech/db?sslmode=require");
   assert.throws(() => validateDatabaseUrl(testUrl + "?sslmode=disable", true), /DATABASE_TLS_REQUIRED/);
+  assert.throws(() => validateDatabaseUrl(testUrl, true), /DATABASE_TLS_REQUIRED/);
+  assert.throws(() => validateDatabaseUrl(testUrl + "?sslmode=prefer", true), /DATABASE_TLS_REQUIRED/);
 });
 
 test("missing DB credentials fail before acquiring or querying any pool", () => {

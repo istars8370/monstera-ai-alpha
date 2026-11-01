@@ -11,7 +11,9 @@ export function validateDatabaseUrl(value: string | undefined, production = fals
   if (!["postgres:", "postgresql:"].includes(parsed.protocol) || !parsed.hostname ||
       !parsed.username || !parsed.password || !parsed.pathname || parsed.pathname === "/" ||
       parsed.hash) throw new Error("INVALID_DATABASE_URL");
-  if (production && parsed.searchParams.get("sslmode") === "disable") {
+  if (production && !["require", "verify-ca", "verify-full"].includes(
+    parsed.searchParams.get("sslmode") ?? "",
+  )) {
     throw new Error("DATABASE_TLS_REQUIRED");
   }
   return value;
