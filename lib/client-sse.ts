@@ -17,6 +17,7 @@ export class ChatSseParser {
     const events: ChatSseEvent[] = [];
     let end: number;
     while ((end = this.buffer.indexOf("\n\n")) >= 0) {
+      if (end > 65536) throw new Error("CHAT_SSE_FRAME_TOO_LARGE");
       const frame = this.buffer.slice(0, end);
       this.buffer = this.buffer.slice(end + 2);
       const lines = frame.split("\n");
