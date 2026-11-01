@@ -207,6 +207,7 @@ jobs:
           docker run -d --rm --name monstera-integration-ci -p 4307:3000 \
             -e ALPHA_BASIC_USER=ci-alpha \
             -e ALPHA_BASIC_PASSWORD=ci-only-alpha-password-not-a-real-secret \
+            -e MONSTERA_SESSION_SECRET=ci-only-signing-key-do-not-use-for-real-sessions \
             monstera-integration:ci
           trap 'docker rm -f monstera-integration-ci >/dev/null 2>&1 || true' EXIT
           READY=0
