@@ -175,3 +175,32 @@ test("IndexedDB unavailability is handled without revealing other users' stored 
   await expect(page.getByText("MOCK_REPLY:no local storage")).toBeVisible();
   await expect(page.getByRole("status")).toContainText("로컬 기록 저장 실패");
 });
+
+
+test("switching user midflight aborts old stream before any cross-account reply is saved", async ({ page, context }) => {
+  const state = { user: alice, sent: [], mode: "slow" };
+  await mockNetwork(context, state);
+  await page.goto("/");
+  await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await page.getByRole("textbox", { name: "메시지" }).fill("Alice secret pending");
+  await page.getByRole("button", { name: "전송" }).click();
+  await expect(page.getByRole("button", { name: "중단" })).toBeEnabled();
+
+  state.user = bob;
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(page.getByRole("link", { name: "Google로 로그인" })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await expect(page.getByText("Alice secret pending")).toHaveCount(0);
+  const bobRecords = await page.evaluate(userId => new Promise((resolve, reject) => {
+    const open = indexedDB.open("monstera-alpha-local");
+    open.onsuccess = () => {
+      const db = open.result;
+      const request = db.transaction("chat", "readonly").objectStore("chat").get("messages:" + userId);
+      request.onsuccess = () => { db.close(); resolve(request.result ?? []); };
+      request.onerror = () => reject(request.error);
+    };
+    open.onerror = () => reject(open.error);
+  }), bob);
+  expect(bobRecords.every(m => !m.content.includes("Alice secret"))).toBe(true);
+});
