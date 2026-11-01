@@ -13,7 +13,14 @@ Next.js 15, TypeScript, Neon PostgreSQL/Drizzle, Upstash Redis, OpenRouter and D
     corepack pnpm test
     corepack pnpm build
 
-GitHub Actions executes these checks. The integration workflow also runs real localhost Next.js HTTP smoke tests, mocked Google OAuth / authenticated model + chat handlers, disposable Redis atomic-budget tests, and committed Drizzle SQL on disposable PostgreSQL 16. These tests do not certify live Google, Neon, Upstash or AI provider connectivity.
+GitHub Actions runs frozen install/typecheck/lint/test/build, real localhost HTTP smoke, Playwright Chromium UI journeys against mocked external responses, disposable PostgreSQL/Redis checks, and a pinned-container smoke test. These checks do NOT certify live Google, Neon, Upstash or paid AI provider calls.
+
+## Browser verification and safety gates
+
+- Browser suite: `pnpm exec playwright install --only-shell chromium` then start Next locally and run `pnpm exec playwright test --config=playwright.config.mjs`. CI runs the complete setup automatically.
+- Offline integration setup check: `node scripts/preflight.mjs` prints statuses only; it does not reveal secrets or contact providers.
+- Release readiness and blockers: [MVP Release Gates v1.7](docs/MVP_RELEASE_GATES_v1.7.md).
+- Non-deployment operations checklist: [Operational Readiness Runbook](ALPHA_DEPLOY.md).
 
 ## Environment configuration
 

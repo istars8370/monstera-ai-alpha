@@ -1,39 +1,67 @@
-# MONSTERA AI Alpha 0.1 (비공개 시험)
+# MONSTERA AI — Operational Readiness Runbook (not a deployment authorization)
 
-- 기존 T1~T12 기능을 모두 병합하지 않는다. T1 기반의 독립적 채팅 MVP이다.
-- Stripe, 크레딧, Neon, Redis, ComfyUI, 서버 동기화는 **비활성화**.
-- 비공개 접근은 Basic 인증(HTTPS 필수). 공유 링크만으로 접근할 수 없지만 전문 IAM/SSO 대체는 아니다.
-- 원문은 서버 DB/로그에 저장하지 않는다. 요청은 OpenRouter에 전달되며 제공업체 정책이 적용된다.
-- 대화는 IndexedDB에 **평문**으로 저장된다. 공용 기기/민감 대화에는 사용하지 않는다.
+This document supersedes the initial alpha skeleton notes. MONSTERA AI is a private
+integration candidate; merging, deployment, live credentials and payments need explicit approval.
 
-## 실행
+## Local, non-destructive verification
 
-```bash
-npm install
-npm run typecheck
-npm run build
-npm run dev
-```
+    corepack enable
+    corepack pnpm install --frozen-lockfile
+    corepack pnpm typecheck
+    corepack pnpm lint
+    corepack pnpm test
+    corepack pnpm build
 
-`.env.local`에 ALPHA_BASIC_USER, ALPHA_BASIC_PASSWORD, OPENROUTER_API_KEY, ALPHA_MODEL_ID를 설정한다.
+GitHub integration CI also applies committed Drizzle SQL to a disposable PostgreSQL service,
+tests Redis Lua budgets on a disposable Redis server, starts the built Next.js app and
+runs mock-backed Playwright Chromium browser journeys. These checks are NOT live provider tests.
 
-## Fly 배포 (사용자 Fly 계정 필요)
+## Offline configuration inspection
 
-```bash
-fly auth login
-fly apps create YOUR_UNIQUE_APP_NAME
-# fly.toml app을 YOUR_UNIQUE_APP_NAME으로 변경
-fly secrets set ALPHA_BASIC_USER=alpha ALPHA_BASIC_PASSWORD='STRONG_RANDOM_PASSWORD' OPENROUTER_API_KEY='YOUR_KEY' ALPHA_MODEL_ID='YOUR_OPENROUTER_MODEL_ID'
-fly deploy
-curl -i https://YOUR_UNIQUE_APP_NAME.fly.dev/api/health
-curl -i https://YOUR_UNIQUE_APP_NAME.fly.dev/
-```
+    node scripts/preflight.mjs
 
-예상: /api/health 200, / 인증 없이 401, 올바른 Basic 인증 시 200.
-비용: Fly Machine 및 OpenRouter 사용량에 따라 청구될 수 있다.
+Reports status of the alpha Basic gate, public HTTPS origin, Google OAuth, signed sessions,
+test Neon URL, Upstash REST URL, at least one AI provider, alpha opt-in, model allowlist,
+and global daily request cap. Does not display credential values, resolve URLs or call APIs.
 
-## 주의
+The command can report that the configuration is syntactically ready, **not that a credential
+works** or that provider spend limits are configured. Operator approval is still required.
 
-- 결제 기능을 비활성화했으므로 **릴리스 마이그레이션도 실행하지 않는다**.
-- 앱 레벨 사용량 제한/쿼터는 아직 없다. 외부에 인증 정보를 공유하지 말고 OpenRouter 계정의 지출 한도를 설정한다.
-- 프로세스 실행/모델 스트리밍/실제 Fly 배포는 별도로 검증해야 한다.
+## Environment prerequisites (never commit actual values)
+
+- ALPHA_BASIC_USER / ALPHA_BASIC_PASSWORD — strong temporary private access gate.
+- MONSTERA_PUBLIC_ORIGIN — exact public HTTPS origin.
+- GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET — OAuth Web client with the matching callback URL.
+- MONSTERA_SESSION_SECRET — randomly generated secret, >=32 bytes, stored in secret manager.
+- DATABASE_URL — dedicated nonproduction Neon database initially; TLS enabled.
+- UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN — dedicated nonproduction Redis.
+- OPENROUTER_API_KEY / DEEPINFRA_API_KEY — server-side only; use no live calls without budget approval.
+- MONSTERA_FREE_CHAT_ENABLED / MONSTERA_ALPHA_APPROVED_MODELS / MONSTERA_ALPHA_DAILY_REQUEST_CAP —
+  remain disabled or unconfigured until cost and provider controls are reviewed.
+
+A local-zero model price does not prove the upstream provider is free. Call quotas are not
+a monetary cap; configure a provider-side spending limit separately.
+
+## Container verification (no deployment)
+
+The Dockerfile builds with pnpm 9.15.9 and the frozen lockfile, then runs Next's standalone
+server as a non-root user. GitHub container-smoke tests HTTP /api/health, the Basic gate
+and a forbidden user-scoped endpoint without a session. This is not a production rollout.
+
+## Release checks, operations and incident response
+
+1. Obtain approval for a nonproduction environment and test identity; verify OAuth/Neon.
+2. Confirm immutable Google sub ownership and reject auto-linking legacy email-only accounts.
+3. Restore a disposable Neon backup and validate migrations before production scheduling.
+4. Review inbound TLS, public origin, protected cookies and storage risk.
+5. Set money-denominated provider budgets and alerts, separate from Redis request caps.
+6. Validate monitored provider failures, upstream usage, timeouts and cancellation on test credits.
+7. Define credit pricing and reconciliation before enabling even a limited paid pilot.
+8. Establish rollback: preserve previous image digest, point-in-time DB restore plan,
+   session secret handling and approved incident contacts.
+9. Verify actual Fly app name, limits, health check and secret access only after approval.
+10. Receive separate approval for merge, actual deployment, production database migrations,
+    paid API calls, payment activation and public access.
+
+If any condition fails, keep the Draft PR open and the environment offline.
+Refer to docs/MVP_RELEASE_GATES_v1.7.md for evidence and release gate status.
