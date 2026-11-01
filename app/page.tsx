@@ -43,6 +43,18 @@ function serializeStorageMutation(action: () => Promise<void>): Promise<void> {
 function saveChat(messages: Message[], userId: string): Promise<void> {
   return serializeStorageMutation(() => writeChat(messages, userId));
 }
+async function deleteLocalChatForUser(userId: string): Promise<void> {
+  return serializeStorageMutation(async () => {
+    const db = await openDb();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction("chat", "readwrite");
+      tx.objectStore("chat").delete("messages:" + userId);
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
+      tx.onabort = () => { db.close(); reject(tx.error); };
+    });
+  });
+}
 async function deleteAllLocalChat(): Promise<void> {
   return serializeStorageMutation(async () => {
     const db = await openDb();
@@ -89,7 +101,9 @@ export default function HomePage() {
         if (!response.ok) return null;
         return await response.json() as { available?: number };
       }).then(balance => {
-        if (!cancelled && typeof balance?.available === "number") setAvailableCredits(balance.available);
+        if (!cancelled && userIdRef.current === data.userId && typeof balance?.available === "number") {
+          setAvailableCredits(balance.available);
+        }
       }).catch(() => undefined);
       try {
         const items = await loadChat(data.userId);
@@ -153,6 +167,19 @@ export default function HomePage() {
       setAvailableCredits(null);
       setNotice("로그아웃했습니다. 브라우저의 대화 기록은 유지됩니다.");
     } catch { setNotice("로그아웃 요청이 실패했습니다."); }
+  }
+  async function deleteCurrentHistory() {
+    const userId = userIdRef.current;
+    if (!userId || busy || !signedIn || !window.confirm("현재 로그인한 계정의 이 기기 대화 기록을 삭제하시겠습니까?")) return;
+    try {
+      await deleteLocalChatForUser(userId);
+      if (userIdRef.current !== userId) return;
+      messagesRef.current = [];
+      setMessages([]);
+      setNotice("현재 계정의 이 기기 대화 기록을 삭제했습니다.");
+    } catch {
+      if (userIdRef.current === userId) setNotice("현재 계정 기록 삭제에 실패했습니다.");
+    }
   }
   async function deleteDeviceHistory() {
     if (busy || !window.confirm("이 브라우저에 저장된 모든 계정의 대화 기록을 삭제하시겠습니까?")) return;
@@ -283,7 +310,7 @@ export default function HomePage() {
           <button type="submit" disabled={busy || !input.trim() || !modelId || !signedIn}
             className="rounded-lg bg-emerald-700 px-5 py-2 text-white disabled:opacity-40">전송</button>
           <button type="button" disabled={!busy} onClick={() => abortRef.current?.abort()} className="rounded-lg border px-5 py-2 disabled:opacity-40">중단</button>
-          <button type="button" disabled={busy} onClick={() => { update([]); setNotice("이 브라우저의 대화 기록을 지웠습니다."); }}
+          <button type="button" disabled={busy || !signedIn} onClick={() => void deleteCurrentHistory()}
             className="ml-auto rounded-lg border px-4 py-2">현재 계정 기록 삭제</button>
           <button type="button" disabled={busy} onClick={() => void deleteDeviceHistory()} className="rounded-lg border px-4 py-2">이 기기 모든 기록 삭제</button>
         </div>
