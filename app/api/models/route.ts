@@ -24,7 +24,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     ).map(row => ({
       id: row.id, label: row.upstream_id, provider: row.provider, context: row.ctx,
     }));
-    return Response.json({ models }, { headers: { "Cache-Control": "no-store" } });
+    return Response.json({ models, userId: user.id }, { headers: { "Cache-Control": "no-store" } });
   } catch {
     return Response.json({ code: "MODELS_UNAVAILABLE" }, { status: 503 });
   }
