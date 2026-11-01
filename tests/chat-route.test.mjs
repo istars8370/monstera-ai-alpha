@@ -163,6 +163,14 @@ test("route: free chat disabled, Redis failure and price disagreement fail close
   assert.equal(providerCalls.length, 0);
 });
 
+test("route: missing CSRF origin on chat mutation is rejected even with a valid session", async () => {
+  const response = await chat(request("/api/chat", alice, "POST",
+    { modelId: free, messages: userMessage }, { origin: "" }));
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).code, "FORBIDDEN");
+  assert.equal(providerCalls.length, 0);
+});
+
 test("route: invalid origins and oversized JSON are rejected before any provider call", async () => {
   const foreign = await chat(request("/api/chat", alice, "POST", { modelId: free, messages: userMessage },
     { origin: "https://other.example" }));

@@ -80,7 +80,7 @@ async function zeroPriceModelsOnly(ids: string[]): Promise<boolean> {
 }
 
 export async function POST(request: NextRequest): Promise<Response> {
-  if (!trustedOrigin(request)) return Response.json({ code: "FORBIDDEN" }, { status: 403 });
+  if (!trustedOrigin(request, true)) return Response.json({ code: "FORBIDDEN" }, { status: 403 });
   if (Number(request.headers.get("content-length") || 0) > 24000) return Response.json({ code: "TOO_LARGE" }, { status: 413 });
   if (!request.headers.get("content-type")?.startsWith("application/json")) return Response.json({ code: "INVALID_CONTENT_TYPE" }, { status: 415 });
 

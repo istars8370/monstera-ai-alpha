@@ -16,6 +16,8 @@ test("reverse-proxy-safe CSRF check uses configured origin, not internal origin"
     assert.equal(trustedOrigin(foreign), false);
     assert.equal(trustedOrigin(absent), true);
     assert.equal(trustedOrigin(absent, true), false);
+    assert.equal(trustedOrigin(correct, true), true);
+    assert.equal(trustedOrigin(foreign, true), false);
     process.env.MONSTERA_PUBLIC_ORIGIN = "javascript:alert(1)";
     assert.equal(trustedOrigin(correct), false);
   } finally {

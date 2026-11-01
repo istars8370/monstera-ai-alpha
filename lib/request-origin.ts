@@ -6,7 +6,7 @@ export function trustedOrigin(request: NextRequest, requireOrigin = false): bool
   const supplied = request.headers.get("origin");
   if (!supplied) return !requireOrigin;
   const configured = process.env.MONSTERA_PUBLIC_ORIGIN;
-  if (!configured) return supplied === request.nextUrl.origin;
+  if (!configured) return process.env.NODE_ENV !== "production" && supplied === request.nextUrl.origin;
   try {
     const url = new URL(configured);
     const local = ["localhost", "127.0.0.1"].includes(url.hostname);
