@@ -46,6 +46,9 @@ export const usageLedger = pgTable("usage_ledger", {
 }, (table) => [
   uniqueIndex("usage_ledger_user_id_idem_key_unique").on(table.userId, table.idemKey),
   check("usage_ledger_reserved_nonnegative", sql`${table.reservedAmount} >= 0`),
+  check("usage_ledger_settled_nonnegative", sql`${table.settledAmount} >= 0`),
+  check("usage_ledger_settled_within_reserved", sql`${table.settledAmount} <= ${table.reservedAmount}`),
+  check("usage_ledger_tokens_nonnegative", sql`${table.inTokens} >= 0 AND ${table.outTokens} >= 0`),
 ]);
 
 export const modelRegistry = pgTable("model_registry", {
@@ -57,7 +60,10 @@ export const modelRegistry = pgTable("model_registry", {
   priceIn: numeric("price_in", { precision: 20, scale: 10 }).notNull(),
   priceOut: numeric("price_out", { precision: 20, scale: 10 }).notNull(),
   enabled: boolean("enabled").notNull().default(false),
-});
+}, (table) => [
+  check("model_registry_ctx_positive", sql`${table.ctx} > 0`),
+  check("model_registry_prices_nonnegative", sql`${table.priceIn} >= 0 AND ${table.priceOut} >= 0`),
+]);
 
 export const syncBlobs = pgTable("sync_blobs", {
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
