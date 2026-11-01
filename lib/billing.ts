@@ -14,12 +14,24 @@ export interface HoldInput {
   priceSnapshot: string;
 }
 function validAmount(value: number): boolean {
-  return Number.isSafeInteger(value) && value >= 0;
+  return Number.isSafeInteger(value) && value >= 0 && value <= 2147483647;
+}
+
+// A duplicate key is valid only if it refers to the SAME model, maximum hold and price snapshot.
+export function assertCompatibleHold(
+  existing: { model: string; reserved_amount: number; price_snapshot: string | null },
+  input: HoldInput,
+): void {
+  if (existing.model !== input.model || existing.reserved_amount !== input.reserved ||
+      existing.price_snapshot !== input.priceSnapshot) {
+    throw new Error("IDEMPOTENCY_KEY_REUSED");
+  }
 }
 
 // 모든 예약은 한 트랜잭션에서 멱등 게이트를 먼저 통과한다.
 export async function holdCredits(input: HoldInput): Promise<HoldResult> {
-  if (!validAmount(input.reserved) || input.reserved === 0 || input.requestId.length > 128 || !input.requestId) throw new Error("INVALID_HOLD");
+  if (!validAmount(input.reserved) || input.reserved === 0 || input.requestId.length > 128 || !input.requestId ||
+      !input.model || input.model.length > 512 || !input.priceSnapshot || input.priceSnapshot.length > 4096) throw new Error("INVALID_HOLD");
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
@@ -30,13 +42,16 @@ export async function holdCredits(input: HoldInput): Promise<HoldResult> {
       [input.userId, input.requestId, input.model, input.reserved, input.priceSnapshot],
     );
     if (!inserted.rowCount) {
-      const existing = await client.query<{ status: string; settled_amount: number }>(
-        "SELECT status, settled_amount FROM usage_ledger WHERE user_id = $1 AND idem_key = $2",
+      const existing = await client.query<{
+        status: string; settled_amount: number; model: string; reserved_amount: number; price_snapshot: string | null;
+      }>(
+        "SELECT status, settled_amount, model, reserved_amount, price_snapshot FROM usage_ledger WHERE user_id = $1 AND idem_key = $2",
         [input.userId, input.requestId],
       );
-      await client.query("COMMIT");
       const item = existing.rows[0];
       if (!item) throw new Error("LEDGER_CONFLICT_RETRY");
+      assertCompatibleHold(item, input);
+      await client.query("COMMIT");
       if (item.status === "settled") return { status: "settled", charged: item.settled_amount };
       return { status: item.status === "reclaimed" ? "reclaimed" : "duplicate_held" };
     }
