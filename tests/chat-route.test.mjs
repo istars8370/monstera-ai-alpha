@@ -105,6 +105,15 @@ test("route: authenticated chat streams one completion from mocked OpenRouter", 
   assert.ok(queries().filter(x => x.sql.includes("FROM users WHERE id")).every(x => x.parameters[0] === alice));
 });
 
+test("route: stale tab cannot send another account's local history under a new session", async () => {
+  const response = await chat(request("/api/chat", bob, "POST", {
+    modelId: free, messages: [{ role: "user", content: "private Alice history" }],
+  }, { "x-monstera-expected-user": alice }));
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, "SESSION_CHANGED");
+  assert.equal(providerCalls.length, 0);
+});
+
 test("route: tier checks, unknown models and paid models reject before provider invocation", async () => {
   for (const [modelId, status, code] of [
     [creator, 403, "TIER_FORBIDDEN"],
