@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPool } from "@/db/pool";
-import { FLOW_COOKIE_OPTIONS, OAUTH_COOKIE_NAMES, fixedTimeEqual, googleOAuthConfig, verifyGoogleIdToken } from "@/lib/google-oidc";
+import { FLOW_COOKIE_OPTIONS, OAUTH_COOKIE_NAMES, fixedTimeEqual, googleOAuthConfig, verifyGoogleIdToken, verifySignedOAuthState } from "@/lib/google-oidc";
 import { newSessionCookie, SESSION_COOKIE, sessionCookieOptions } from "@/lib/auth";
 
 export const runtime = "nodejs";
@@ -22,6 +22,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const verifier = request.cookies.get(OAUTH_COOKIE_NAMES.verifier)?.value;
   const code = query.get("code");
   if (query.has("error") || !fixedTimeEqual(query.get("state") ?? undefined, state) ||
+      !verifySignedOAuthState(state, process.env.MONSTERA_SESSION_SECRET ?? "") ||
       !nonce || !verifier || !code || code.length > 4096) return errorResponse(401);
   try {
     const config = googleOAuthConfig();
