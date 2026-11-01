@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server";
 import { trustedOrigin } from "@/lib/request-origin";
 import { Redis } from "@upstash/redis";
-import { approvedFreeModels, reserveAlphaRequest, type FreeModelRecord } from "@/lib/alpha-cost-control";
+import { approvedFreeModels, reserveAlphaRequest, reserveEstimatedDailyBudget, type FreeModelRecord } from "@/lib/alpha-cost-control";
+import { matchingReviewedProviderPrices, estimateRouteMaximumCost } from "@/lib/provider-cost-policy";
 import { authenticatedUser } from "@/lib/auth";
 import { getPool } from "@/db/pool";
 import { DatabaseModelRegistry } from "@/lib/model-registry";
@@ -56,27 +57,47 @@ function parseRequest(payload: unknown): ParsedChat {
   return { modelId: body.modelId, fallbackModelId: body.fallbackModelId as string | undefined, messages: entries as ChatMessage[] };
 }
 
-async function reserveAlphaBudget(userId: string) {
+async function reserveAlphaBudget(userId: string, selectedModels: FreeModelRecord[]) {
+  // A manual acknowledgment is NOT proof of a provider hard spending limit.
+  // Operators must separately configure AND verify it with their provider.
+  if (process.env.MONSTERA_PROVIDER_SPENDING_LIMIT_CONFIRMED !== "true") {
+    throw new Error("PROVIDER_SPENDING_LIMIT_UNVERIFIED");
+  }
+  const namespace = process.env.MONSTERA_REDIS_NAMESPACE;
+  if (!namespace) throw new Error("REDIS_NAMESPACE_NOT_CONFIGURED");
+  const snapshots = matchingReviewedProviderPrices(
+    process.env.MONSTERA_ALPHA_PROVIDER_PRICES_JSON, selectedModels,
+  );
+  const exposure = estimateRouteMaximumCost(snapshots);
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
   if (!url || !token) throw new Error("RATE_LIMIT_NOT_CONFIGURED");
   const redis = new Redis({ url, token });
-  return reserveAlphaRequest(
-    userId,
-    process.env.MONSTERA_ALPHA_DAILY_REQUEST_CAP,
-    (script, keys, args) => redis.eval(script, keys, args),
+  const evalScript = (script: string, keys: string[], args: string[]) => redis.eval(script, keys, args);
+  // The count guard is conservative: a cost-blocked request also consumes a
+  // rate-limit slot. The only purpose is to fail closed before upstream calls.
+  const countDecision = await reserveAlphaRequest(
+    userId, process.env.MONSTERA_ALPHA_DAILY_REQUEST_CAP,
+    evalScript, new Date(), namespace,
   );
+  if (countDecision !== "allowed") return countDecision;
+  const spendDecision = await reserveEstimatedDailyBudget(
+    namespace, process.env.MONSTERA_ALPHA_ESTIMATED_MICRO_USD_PER_DAY,
+    exposure.estimatedMaximumMicroUsd, evalScript,
+  );
+  return spendDecision === "daily_estimate_limit" ? "estimated_budget_exceeded" : "allowed";
 }
 
-// All selected primary and fallback models must be explicitly approved, enabled and
-// recorded as zero-price in our registry. This does NOT guarantee free upstream billing.
-async function zeroPriceModelsOnly(ids: string[]): Promise<boolean> {
+// Every selected primary/fallback model must have a reviewed allowlist entry.
+// The internal zero price permits alpha routing but proves nothing about actual upstream charges.
+async function approvedModelRows(ids: string[]): Promise<FreeModelRecord[] | null> {
   const rows = await getPool().query<FreeModelRecord>(
     "SELECT id, provider, upstream_id, price_in, price_out FROM model_registry " +
     "WHERE enabled = true AND id = ANY($1::uuid[])",
     [ids],
   );
-  return approvedFreeModels(rows.rows, ids, process.env.MONSTERA_ALPHA_APPROVED_MODELS);
+  return approvedFreeModels(rows.rows, ids, process.env.MONSTERA_ALPHA_APPROVED_MODELS)
+    ? rows.rows : null;
 }
 
 export async function POST(request: NextRequest): Promise<Response> {
@@ -117,12 +138,12 @@ export async function POST(request: NextRequest): Promise<Response> {
     return Response.json({ code: "MODELS_UNAVAILABLE" }, { status: 503 });
   }
   try {
-    if (!(await zeroPriceModelsOnly(requestedModels))) {
-      return Response.json({ code: "MODEL_REQUIRES_BILLING" }, { status: 403 });
-    }
-    const budget = await reserveAlphaBudget(user.id);
+    const models = await approvedModelRows(requestedModels);
+    if (!models) return Response.json({ code: "MODEL_REQUIRES_BILLING" }, { status: 403 });
+    const budget = await reserveAlphaBudget(user.id, models);
     if (budget === "user_rate_limited") return Response.json({ code: "RATE_LIMITED" }, { status: 429 });
     if (budget === "daily_limit_reached") return Response.json({ code: "DAILY_LIMIT_REACHED" }, { status: 429 });
+    if (budget === "estimated_budget_exceeded") return Response.json({ code: "ESTIMATED_BUDGET_EXCEEDED" }, { status: 429 });
   } catch {
     return Response.json({ code: "CHAT_UNAVAILABLE" }, { status: 503 });
   }
