@@ -52,7 +52,8 @@ export default function HomePage() {
       const decoder = new TextDecoder(); let buffer = "";
       while (true) {
         const { value, done } = await reader.read(); if (done) break;
-        buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+        buffer += decoder.decode(value, { stream: true });
+        buffer = buffer.replace(/\r\n/g, "\n");
         let index: number;
         while ((index = buffer.indexOf("\n\n")) >= 0) {
           const event = buffer.slice(0, index); buffer = buffer.slice(index + 2);

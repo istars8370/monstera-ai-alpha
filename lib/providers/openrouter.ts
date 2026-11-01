@@ -12,7 +12,8 @@ export async function* parseSse(response: Response, signal?: AbortSignal): Async
       if (signal?.aborted) throw new Error("UPSTREAM_ABORTED");
       const { done, value } = await reader.read();
       if (done) break;
-      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+      buffer += decoder.decode(value, { stream: true });
+      buffer = buffer.replace(/\r\n/g, "\n");
       let boundary: number;
       while ((boundary = buffer.indexOf("\n\n")) >= 0) {
         const event = buffer.slice(0, boundary);
@@ -29,6 +30,7 @@ export async function* parseSse(response: Response, signal?: AbortSignal): Async
         }
         if (obj.usage) yield { type: "usage", usage: { inputTokens: obj.usage.prompt_tokens ?? 0, outputTokens: obj.usage.completion_tokens ?? 0 } };
       }
+      if (buffer.length > 131072) throw new Error("UPSTREAM_EVENT_TOO_LARGE");
     }
     if (!ended) throw new Error("UPSTREAM_TRUNCATED_SSE");
     yield { type: "done" };
