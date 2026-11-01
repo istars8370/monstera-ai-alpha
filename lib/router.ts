@@ -19,6 +19,11 @@ export class ModelRouter {
     if (!this.adapters[model.provider]) throw new RouterError("PROVIDER_UNAVAILABLE", 503);
     return model;
   }
+  // Explicit preflight lets HTTP endpoints return 403/404 before opening SSE.
+  async assertAccessible(modelIds: readonly string[], tier: Tier): Promise<void> {
+    for (const id of new Set(modelIds)) await this.resolve(id, tier);
+  }
+
   async *chatStream(req: RouteRequest): AsyncIterable<Chunk> {
     const primary = await this.resolve(req.modelId, req.tier);
     const fallback = req.fallbackModelId ? await this.resolve(req.fallbackModelId, req.tier) : undefined;
