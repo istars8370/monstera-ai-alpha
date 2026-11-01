@@ -77,7 +77,36 @@ export default function HomePage() {
         if (!cancelled) setNotice("이 계정의 로컬 기록을 불러올 수 없습니다.");
       }
     }).catch(() => { if (!cancelled) setNotice("인증 또는 모델 조회에 실패했습니다."); });
-    return () => { cancelled = true; abortRef.current?.abort(); };
+    const validateAccount = () => {
+      const displayedUserId = userIdRef.current;
+      if (!displayedUserId || cancelled) return;
+      void fetch("/api/models", { cache: "no-store" }).then(async response => {
+        if (!response.ok) return null;
+        return await response.json() as { userId?: string };
+      }).then(data => {
+        if (cancelled || userIdRef.current !== displayedUserId) return;
+        if (data?.userId !== displayedUserId) {
+          abortRef.current?.abort();
+          userIdRef.current = null;
+          messagesRef.current = [];
+          setMessages([]);
+          setSignedIn(false);
+          setModels([]);
+          setModelId("");
+          setAvailableCredits(null);
+          setNotice("계정이 변경되었거나 세션이 만료되었습니다. 다시 로그인하세요.");
+        }
+      }).catch(() => undefined);
+    };
+    const onVisible = () => { if (document.visibilityState === "visible") validateAccount(); };
+    window.addEventListener("focus", validateAccount);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      abortRef.current?.abort();
+      window.removeEventListener("focus", validateAccount);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   const update = (items: Message[]) => {
@@ -103,7 +132,7 @@ export default function HomePage() {
   }
   async function send() {
     const content = input.trim();
-    if (!content || busy || !modelId || !signedIn) return;
+    if (!content || busy || !modelId || !signedIn || !userIdRef.current) return;
     const history = [...messagesRef.current, { role: "user" as const, content }];
     setInput("");
     setBusy(true);
@@ -116,10 +145,23 @@ export default function HomePage() {
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Monstera-Expected-User": userIdRef.current ?? "",
+        },
         body: JSON.stringify({ modelId, messages: history.slice(-20) }),
         signal: abort.signal,
       });
+      if (response.status === 409) {
+        abortRef.current?.abort();
+        userIdRef.current = null;
+        messagesRef.current = [];
+        setMessages([]);
+        setSignedIn(false);
+        setModels([]);
+        setModelId("");
+        setAvailableCredits(null);
+      }
       if (!response.ok || !response.body) {
         let code = "HTTP_" + response.status;
         try { const payload: unknown = await response.json(); if (payload && typeof payload === "object" && "code" in payload && typeof payload.code === "string") code = payload.code; }
