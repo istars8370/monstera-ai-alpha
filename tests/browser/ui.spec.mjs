@@ -204,3 +204,43 @@ test("switching user midflight aborts old stream before any cross-account reply 
   }), bob);
   expect(bobRecords.every(m => !m.content.includes("Alice secret"))).toBe(true);
 });
+
+
+test("shared-device privacy: explicitly purge all account histories after confirmation", async ({ page, context }) => {
+  const state = { user: alice, sent: [] };
+  await mockNetwork(context, state);
+  await page.goto("/");
+  await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await page.getByRole("textbox", { name: "메시지" }).fill("Alice local privacy");
+  await page.getByRole("button", { name: "전송" }).click();
+  await expect(page.getByText("MOCK_REPLY:Alice local privacy")).toBeVisible();
+  state.user = bob;
+  await page.reload();
+  await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await page.getByRole("textbox", { name: "메시지" }).fill("Bob local privacy");
+  await page.getByRole("button", { name: "전송" }).click();
+  await expect(page.getByText("MOCK_REPLY:Bob local privacy")).toBeVisible();
+
+  page.once("dialog", dialog => dialog.dismiss());
+  await page.getByRole("button", { name: "이 기기 모든 기록 삭제" }).click();
+  await expect(page.getByText("MOCK_REPLY:Bob local privacy")).toBeVisible();
+
+  page.once("dialog", dialog => dialog.accept());
+  await page.getByRole("button", { name: "이 기기 모든 기록 삭제" }).click();
+  await expect(page.getByRole("status")).toContainText("모든 계정 대화 기록을 삭제했습니다");
+  await expect(page.getByText("Bob local privacy")).toHaveCount(0);
+  const count = await page.evaluate(() => new Promise((resolve, reject) => {
+    const open = indexedDB.open("monstera-alpha-local");
+    open.onsuccess = () => {
+      const db = open.result;
+      const request = db.transaction("chat", "readonly").objectStore("chat").count();
+      request.onsuccess = () => { db.close(); resolve(request.result); };
+      request.onerror = () => reject(request.error);
+    };
+    open.onerror = () => reject(open.error);
+  }));
+  expect(count).toBe(0);
+  state.user = alice;
+  await page.reload();
+  await expect(page.getByText("Alice local privacy")).toHaveCount(0);
+});

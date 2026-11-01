@@ -24,7 +24,7 @@ async function loadChat(userId: string): Promise<Message[]> {
     req.onerror = () => { db.close(); reject(req.error); };
   });
 }
-async function saveChat(messages: Message[], userId: string): Promise<void> {
+async function writeChat(messages: Message[], userId: string): Promise<void> {
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction("chat", "readwrite");
@@ -33,6 +33,29 @@ async function saveChat(messages: Message[], userId: string): Promise<void> {
     tx.onerror = () => { db.close(); reject(tx.error); };
   });
 }
+// Serialize mutations so an older asynchronous write cannot resurrect a cleared history.
+let pendingStorageMutation: Promise<void> = Promise.resolve();
+function serializeStorageMutation(action: () => Promise<void>): Promise<void> {
+  const current = pendingStorageMutation.then(action);
+  pendingStorageMutation = current.catch(() => undefined);
+  return current;
+}
+function saveChat(messages: Message[], userId: string): Promise<void> {
+  return serializeStorageMutation(() => writeChat(messages, userId));
+}
+async function deleteAllLocalChat(): Promise<void> {
+  return serializeStorageMutation(async () => {
+    const db = await openDb();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction("chat", "readwrite");
+      tx.objectStore("chat").clear();
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
+      tx.onabort = () => { db.close(); reject(tx.error); };
+    });
+  });
+}
+
 export default function HomePage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [models, setModels] = useState<ModelChoice[]>([]);
@@ -131,6 +154,17 @@ export default function HomePage() {
       setNotice("로그아웃했습니다. 브라우저의 대화 기록은 유지됩니다.");
     } catch { setNotice("로그아웃 요청이 실패했습니다."); }
   }
+  async function deleteDeviceHistory() {
+    if (busy || !window.confirm("이 브라우저에 저장된 모든 계정의 대화 기록을 삭제하시겠습니까?")) return;
+    try {
+      await deleteAllLocalChat();
+      messagesRef.current = [];
+      setMessages([]);
+      setNotice("이 기기의 모든 계정 대화 기록을 삭제했습니다.");
+    } catch {
+      setNotice("기기 기록 삭제에 실패했습니다. 브라우저 저장소 권한을 확인하세요.");
+    }
+  }
   async function send() {
     const content = input.trim();
     const initiatingUserId = userIdRef.current;
@@ -214,7 +248,7 @@ export default function HomePage() {
     <main className="mx-auto max-w-3xl p-6 md:p-12">
       <header className="mb-8">
         <h1 className="text-3xl font-bold">MONSTERA AI <span className="text-sm font-normal text-slate-500">Alpha · Private</span></h1>
-        <p className="mt-2 text-slate-500">서버에는 대화 본문을 저장하지 않습니다. 기록은 이 브라우저에 저장됩니다.</p>
+        <p className="mt-2 text-slate-500">서버에는 대화 본문을 저장하지 않습니다. 기록은 이 브라우저에 암호화되지 않은 평문으로 저장됩니다. 공용 기기에서는 저장 기록에 주의하세요.</p>
         <div className="flex gap-3 mt-4 items-center">
           {!signedIn ? (
             <a className="rounded-lg bg-emerald-700 text-white px-4 py-2" href="/api/auth/google">Google로 로그인</a>
@@ -250,7 +284,8 @@ export default function HomePage() {
             className="rounded-lg bg-emerald-700 px-5 py-2 text-white disabled:opacity-40">전송</button>
           <button type="button" disabled={!busy} onClick={() => abortRef.current?.abort()} className="rounded-lg border px-5 py-2 disabled:opacity-40">중단</button>
           <button type="button" disabled={busy} onClick={() => { update([]); setNotice("이 브라우저의 대화 기록을 지웠습니다."); }}
-            className="ml-auto rounded-lg border px-4 py-2">기록 삭제</button>
+            className="ml-auto rounded-lg border px-4 py-2">현재 계정 기록 삭제</button>
+          <button type="button" disabled={busy} onClick={() => void deleteDeviceHistory()} className="rounded-lg border px-4 py-2">이 기기 모든 기록 삭제</button>
         </div>
       </form>
       <p className="mt-6 text-xs text-slate-500">
