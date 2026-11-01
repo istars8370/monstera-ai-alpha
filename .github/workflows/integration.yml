@@ -81,3 +81,41 @@ jobs:
           wait "$B"
           RESERVED=$($PSQL -tAc "SELECT reserved FROM credits WHERE user_id=(SELECT id FROM users WHERE email='concurrent-test@example.invalid');")
           test "$RESERVED" = '80'
+
+  http-smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      ALPHA_BASIC_USER: ci-alpha
+      ALPHA_BASIC_PASSWORD: ci-only-alpha-password-not-a-real-secret
+      GOOGLE_CLIENT_ID: ci-client-id
+      GOOGLE_CLIENT_SECRET: ci-placeholder-not-a-secret
+      MONSTERA_PUBLIC_ORIGIN: http://127.0.0.1:3307
+      MONSTERA_TEST_HTTP_ORIGIN: http://127.0.0.1:3307
+      MONSTERA_SESSION_SECRET: ci-only-signing-key-do-not-use-for-real-sessions
+      MONSTERA_FREE_CHAT_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Real HTTP smoke tests (no DB, Google or provider network calls)
+        run: |
+          set -euo pipefail
+          pnpm start -- --hostname 127.0.0.1 --port 3307 > /tmp/monstera-http.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          READY=0
+          for attempt in $(seq 1 50); do
+            if curl -fsS http://127.0.0.1:3307/api/health > /dev/null; then READY=1; break; fi
+            sleep 1
+          done
+          if [ "$READY" -ne 1 ]; then cat /tmp/monstera-http.log; exit 1; fi
+          node --test tests/http-smoke.mjs
