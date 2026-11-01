@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign } from "node:crypto";
 import { createSessionToken, readSessionToken, SESSION_LIFETIME_SECONDS } from "../lib/session-token.ts";
-import { fixedTimeEqual, verifyGoogleIdToken } from "../lib/google-oidc.ts";
+import { fixedTimeEqual, signOAuthState, verifySignedOAuthState, verifyGoogleIdToken } from "../lib/google-oidc.ts";
 
 const uuid = "12345678-1234-4234-a234-123456789abc";
 const secret = "local-only-test-secret-with-more-than-32-chars";
@@ -53,4 +53,16 @@ test("OIDC: Google RSA signature and user claims required", async () => {
   await assert.rejects(verifyGoogleIdToken(makeToken({ ...claims, email_verified: false }), "test-client", "the-nonce", fetcher, now));
   const { privateKey: otherKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
   await assert.rejects(verifyGoogleIdToken(makeToken(claims, otherKey), "test-client", "the-nonce", fetcher, now));
+});
+
+
+test("OAuth: callback requires signed state from a Basic-protected initiation", () => {
+  const secret = "an-isolated-test-secret-longer-than-thirty-two-characters";
+  const state = signOAuthState("R".repeat(43), secret);
+  assert.equal(verifySignedOAuthState(state, secret), true);
+  assert.equal(verifySignedOAuthState(state, secret + "-changed"), false);
+  assert.equal(verifySignedOAuthState(state.replace(/^R/, "X"), secret), false);
+  assert.equal(verifySignedOAuthState("R".repeat(43), secret), false);
+  assert.equal(verifySignedOAuthState(state, "short"), false);
+  assert.throws(() => signOAuthState("short", secret), /INVALID_OAUTH_STATE_SECRET/);
 });
