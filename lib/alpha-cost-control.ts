@@ -14,8 +14,9 @@ export function approvedFreeModels(
 ): boolean {
   if (!approvedNames || requestedIds.length < 1) return false;
   const allow = new Set(approvedNames.split(",").map(v => v.trim()).filter(Boolean));
-  if (allow.size === 0 || models.length !== new Set(requestedIds).size) return false;
   const ids = new Set(requestedIds);
+  if (allow.size === 0 || models.length !== ids.size ||
+      new Set(models.map(m => m.id)).size !== ids.size) return false;
   return models.every(m =>
     ids.has(m.id) && allow.has(m.provider + ":" + m.upstream_id) &&
     Number.isFinite(Number(m.price_in)) && Number(m.price_in) === 0 &&
