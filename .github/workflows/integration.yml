@@ -109,16 +109,16 @@ jobs:
       - name: Real HTTP smoke tests (no DB, Google or provider network calls)
         run: |
           set -euo pipefail
-          pnpm start -- --hostname 127.0.0.1 --port 3307 > /tmp/monstera-http.log 2>&1 &
+          pnpm exec next start --hostname 127.0.0.1 --port 3307 > /tmp/monstera-http.log 2>&1 &
           SERVER_PID=$!
           trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
           READY=0
-          for attempt in $(seq 1 50); do
+          for attempt in $(seq 1 20); do
             if curl -fsS http://127.0.0.1:3307/api/health > /dev/null; then READY=1; break; fi
             sleep 1
           done
           if [ "$READY" -ne 1 ]; then cat /tmp/monstera-http.log; exit 1; fi
-          node --test tests/http-smoke.mjs
+          timeout 45s node --test tests/http-smoke.mjs
 
   redis-smoke:
     runs-on: ubuntu-latest
