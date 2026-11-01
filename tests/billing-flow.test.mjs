@@ -77,3 +77,15 @@ test("billing lifecycle: two accounts can independently use same idempotency key
   assert.deepEqual(billingCredit(bob), { balance: 70, reserved: 0 });
   assert.deepEqual(billingCredit(alice), { balance: 100, reserved: 40 });
 });
+
+
+test("billing lifecycle: reclaim rollback preserves reservations if ledger transition fails", async () => {
+  await holdCredits(base);
+  expireBillingLedger(alice, base.requestId);
+  failNextBillingQuery("UPDATE usage_ledger SET status = 'reclaimed'");
+  await assert.rejects(reclaimExpired(), /MOCK_DATABASE_WRITE_FAILED/);
+  assert.deepEqual(billingCredit(alice), { balance: 100, reserved: 40 });
+  assert.equal(billingLedger(alice, base.requestId).status, "held");
+  assert.equal(await reclaimExpired(), 1);
+  assert.deepEqual(billingCredit(alice), { balance: 100, reserved: 0 });
+});

@@ -131,7 +131,11 @@ export async function reclaimExpired(limit = 100): Promise<number> {
         [item.reserved_amount, item.user_id],
       );
       if (updated.rowCount !== 1) throw new Error("CREDIT_INVARIANT_BROKEN");
-      await client.query("UPDATE usage_ledger SET status = 'reclaimed' WHERE id = $1", [item.id]);
+      const ledgerUpdated = await client.query(
+        "UPDATE usage_ledger SET status = 'reclaimed' WHERE id = $1 AND status = 'held'",
+        [item.id],
+      );
+      if (ledgerUpdated.rowCount !== 1) throw new Error("LEDGER_INVARIANT_BROKEN");
     }
     await client.query("COMMIT");
     return expired.rows.length;
