@@ -24,3 +24,43 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
+
+  database-smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: integration_user
+          POSTGRES_PASSWORD: ephemeral_only
+          POSTGRES_DB: monstera_integration
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U integration_user -d monstera_integration"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Assert Drizzle migration matches current schema
+        run: |
+          pnpm exec drizzle-kit generate --config=drizzle.config.ts
+          test -z "$(git status --porcelain -- db/migrations)"
+      - name: Apply SQL and check isolated credit ledger invariants
+        run: |
+          set -eu
+          for migration in db/migrations/*.sql; do
+            docker run --rm -i --network host -e PGPASSWORD=ephemeral_only postgres:16 psql -h 127.0.0.1 -U integration_user -d monstera_integration -v ON_ERROR_STOP=1 < "$migration"
+          done
+          docker run --rm -i --network host -e PGPASSWORD=ephemeral_only postgres:16 psql -h 127.0.0.1 -U integration_user -d monstera_integration -v ON_ERROR_STOP=1 < tests/db-smoke.sql
