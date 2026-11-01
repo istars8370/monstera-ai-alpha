@@ -28,6 +28,7 @@ test("billing lifecycle: one hold, duplicate suppression, partial settlement and
   assert.deepEqual(billingCredit(alice), { balance: 80, reserved: 0 });
   assert.deepEqual(await settleCredits(alice, base.requestId, 20), { status: "settled", charged: 20 });
   assert.deepEqual(await holdCredits(base), { status: "settled", charged: 20 });
+  await assert.rejects(settleCredits(alice, base.requestId, 21), /SETTLEMENT_REPLAY_MISMATCH/);
   assert.deepEqual(billingCredit(alice), { balance: 80, reserved: 0 });
 });
 

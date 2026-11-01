@@ -61,7 +61,8 @@ export async function holdCredits(input: HoldInput): Promise<HoldResult> {
       [input.reserved, input.userId],
     );
     if (!reserved.rowCount) {
-      await client.query("DELETE FROM usage_ledger WHERE id = $1", [inserted.rows[0].id]);
+      const removed = await client.query("DELETE FROM usage_ledger WHERE id = $1", [inserted.rows[0].id]);
+      if (removed.rowCount !== 1) throw new Error("LEDGER_INVARIANT_BROKEN");
       await client.query("COMMIT");
       return { status: "insufficient" };
     }
@@ -87,7 +88,11 @@ export async function settleCredits(userId: string, requestId: string, charged: 
     );
     const item = result.rows[0];
     if (!item) { await client.query("COMMIT"); return { status: "missing" }; }
-    if (item.status === "settled") { await client.query("COMMIT"); return { status: "settled", charged: item.settled_amount }; }
+    if (item.status === "settled") {
+      if (item.settled_amount !== charged) throw new Error("SETTLEMENT_REPLAY_MISMATCH");
+      await client.query("COMMIT");
+      return { status: "settled", charged: item.settled_amount };
+    }
     if (item.status !== "held") { await client.query("COMMIT"); return { status: "reclaimed" }; }
     if (charged > item.reserved_amount) throw new Error("SETTLEMENT_EXCEEDS_RESERVATION");
     const updated = await client.query(
@@ -96,10 +101,11 @@ export async function settleCredits(userId: string, requestId: string, charged: 
       [charged, item.reserved_amount, userId],
     );
     if (updated.rowCount !== 1) throw new Error("CREDIT_INVARIANT_BROKEN");
-    await client.query(
+    const ledgerUpdated = await client.query(
       "UPDATE usage_ledger SET status = 'settled', settled_amount = $1 WHERE id = $2",
       [charged, item.id],
     );
+    if (ledgerUpdated.rowCount !== 1) throw new Error("LEDGER_INVARIANT_BROKEN");
     await client.query("COMMIT");
     return { status: "settled", charged };
   } catch (error) {
