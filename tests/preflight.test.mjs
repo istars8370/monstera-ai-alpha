@@ -16,11 +16,19 @@ const template = {
   MONSTERA_FREE_CHAT_ENABLED: "true",
   MONSTERA_ALPHA_APPROVED_MODELS: "openrouter:mock/free",
   MONSTERA_ALPHA_DAILY_REQUEST_CAP: "10",
+  MONSTERA_REDIS_NAMESPACE: "monstera:ci-staging",
+  MONSTERA_STAGING_ONLY: "true",
+  MONSTERA_EXPECTED_TEST_DB_NAME: "staging",
+  MONSTERA_PROVIDER_SPENDING_LIMIT_CONFIRMED: "true",
+  MONSTERA_ALPHA_ESTIMATED_MICRO_USD_PER_DAY: "100000",
+  MONSTERA_ALPHA_PROVIDER_PRICES_JSON: JSON.stringify([{ provider: "openrouter", model: "mock/free",
+    inputMicroUsdPerMillion: 200000, outputMicroUsdPerMillion: 1000000, inputTokenCeiling: 25000,
+    outputTokenCeiling: 1024, reviewedAt: new Date().toISOString() }]),
 };
 test("preflight: only reports field statuses, never secret values or live success", () => {
   const result = inspectIntegrationConfig(template);
-  assert.equal(result.readyForApprovedLiveTesting, true);
-  assert.equal(result.checks.length, 10);
+  assert.equal(result.syntacticallyConfiguredForStagingReview, true);
+  assert.equal(result.checks.length, 15);
   const serialized = JSON.stringify(result);
   assert.equal(serialized.includes(template.GOOGLE_CLIENT_SECRET), false);
   assert.equal(serialized.includes(template.DATABASE_URL), false);
@@ -28,18 +36,18 @@ test("preflight: only reports field statuses, never secret values or live succes
 });
 test("preflight: missing credentials and invalid budget fail closed", () => {
   const allMissing = inspectIntegrationConfig({});
-  assert.equal(allMissing.readyForApprovedLiveTesting, false);
+  assert.equal(allMissing.syntacticallyConfiguredForStagingReview, false);
   assert.equal(allMissing.checks.every(c => !c.ready), true);
   for (const bad of ["0", "-1", "1001", "1.5", "Infinity", ""]) {
     const result = inspectIntegrationConfig({ ...template, MONSTERA_ALPHA_DAILY_REQUEST_CAP: bad });
-    assert.equal(result.readyForApprovedLiveTesting, false, bad);
+    assert.equal(result.syntacticallyConfiguredForStagingReview, false, bad);
   }
 });
 test("preflight: reject insecure external URLs and DB TLS disable", () => {
   const withoutTls = inspectIntegrationConfig({
     ...template, DATABASE_URL: "postgresql://u:p@db.example.com/staging?sslmode=disable",
   });
-  assert.equal(withoutTls.checks.find(c => c.name === "nonproduction_neon_url").ready, false);
+  assert.equal(withoutTls.checks.find(c => c.name === "declared_nonproduction_db").ready, false);
   const httpRedis = inspectIntegrationConfig({
     ...template, UPSTASH_REDIS_REST_URL: "http://redis.example.com/",
   });
@@ -48,4 +56,21 @@ test("preflight: reject insecure external URLs and DB TLS disable", () => {
     ...template, MONSTERA_PUBLIC_ORIGIN: "http://alpha.example.com/",
   });
   assert.equal(insecureOrigin.checks.find(c => c.name === "public_origin").ready, false);
+});
+
+
+test("preflight: production DB name mismatch, missing stage marker, stale prices and absent monetary approval block readiness", () => {
+  const wrongDb = inspectIntegrationConfig({ ...template, MONSTERA_EXPECTED_TEST_DB_NAME: "production" });
+  assert.equal(wrongDb.syntacticallyConfiguredForStagingReview, false);
+  const noStage = inspectIntegrationConfig({ ...template, MONSTERA_STAGING_ONLY: "false" });
+  assert.equal(noStage.syntacticallyConfiguredForStagingReview, false);
+  const unapproved = inspectIntegrationConfig({ ...template, MONSTERA_PROVIDER_SPENDING_LIMIT_CONFIRMED: "false" });
+  assert.equal(unapproved.syntacticallyConfiguredForStagingReview, false);
+  const stale = inspectIntegrationConfig({ ...template, MONSTERA_ALPHA_PROVIDER_PRICES_JSON: JSON.stringify([{
+    provider: "openrouter", model: "mock/free", inputMicroUsdPerMillion: 200000,
+    outputMicroUsdPerMillion: 1000000, inputTokenCeiling: 25000,
+    outputTokenCeiling: 1024, reviewedAt: "2000-01-01T00:00:00.000Z",
+  }]) });
+  assert.equal(stale.syntacticallyConfiguredForStagingReview, false);
+  assert.ok(unapproved.advisory.includes("unverified"));
 });
