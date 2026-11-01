@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { ChatSseParser } from "@/lib/client-sse";
 
 type Message = { role: "user" | "assistant"; content: string };
 type ModelChoice = { id: string; label: string; provider: string; context: number };
@@ -132,7 +133,8 @@ export default function HomePage() {
   }
   async function send() {
     const content = input.trim();
-    if (!content || busy || !modelId || !signedIn || !userIdRef.current) return;
+    const initiatingUserId = userIdRef.current;
+    if (!content || busy || !modelId || !signedIn || !initiatingUserId) return;
     const history = [...messagesRef.current, { role: "user" as const, content }];
     setInput("");
     setBusy(true);
@@ -140,6 +142,7 @@ export default function HomePage() {
     update(history);
     const abort = new AbortController();
     abortRef.current = abort;
+    const parser = new ChatSseParser();
     let answer = "";
     let completed = false;
     try {
@@ -147,7 +150,7 @@ export default function HomePage() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Monstera-Expected-User": userIdRef.current ?? "",
+          "X-Monstera-Expected-User": initiatingUserId,
         },
         body: JSON.stringify({ modelId, messages: history.slice(-20) }),
         signal: abort.signal,
@@ -164,39 +167,45 @@ export default function HomePage() {
       }
       if (!response.ok || !response.body) {
         let code = "HTTP_" + response.status;
-        try { const payload: unknown = await response.json(); if (payload && typeof payload === "object" && "code" in payload && typeof payload.code === "string") code = payload.code; }
-        catch { /* No error JSON */ }
+        try {
+          const payload: unknown = await response.json();
+          if (payload && typeof payload === "object" && "code" in payload && typeof payload.code === "string") code = payload.code;
+        } catch { /* No error JSON */ }
         throw new Error(code);
       }
       const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        buffer = buffer.replace(/\r\n/g, "\n");
-        let index: number;
-        while ((index = buffer.indexOf("\n\n")) >= 0) {
-          const event = buffer.slice(0, index);
-          buffer = buffer.slice(index + 2);
-          const kind = event.split("\n").find(x => x.startsWith("event: "))?.slice(7);
-          const data = event.split("\n").find(x => x.startsWith("data: "))?.slice(6);
-          if (kind === "error") throw new Error("CHAT_FAILED");
-          if (kind === "done") completed = true;
-          if (kind === "delta" && data) {
-            const parsed: unknown = JSON.parse(data);
-            if (parsed && typeof parsed === "object" && "text" in parsed && typeof parsed.text === "string") answer += parsed.text;
-            update([...history, { role: "assistant", content: answer }]);
+      try {
+        while (!abort.signal.aborted) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (userIdRef.current !== initiatingUserId) {
+            abort.abort();
+            throw new Error("SESSION_CHANGED");
           }
+          for (const event of parser.push(value)) {
+            if (event.kind === "error") throw new Error(event.code);
+            if (event.kind === "done") { completed = true; break; }
+            answer += event.text;
+            if (userIdRef.current === initiatingUserId) {
+              update([...history, { role: "assistant", content: answer }]);
+            }
+          }
+          if (completed) break;
         }
+        parser.finish();
+      } finally {
+        if (!completed) await reader.cancel().catch(() => undefined);
+        reader.releaseLock();
       }
-      if (!completed) throw new Error("CHAT_INTERRUPTED");
     } catch (error) {
-      setNotice(abort.signal.aborted ? "응답을 중단했습니다. 받은 내용만 저장했습니다." :
-        "응답 오류: " + (error instanceof Error ? error.message : "CHAT_FAILED"));
+      if (userIdRef.current === initiatingUserId) {
+        setNotice(abort.signal.aborted ? "응답을 중단했습니다. 받은 내용만 저장했습니다." :
+          "응답 오류: " + (error instanceof Error ? error.message : "CHAT_FAILED"));
+      }
     } finally {
-      if (answer) update([...history, { role: "assistant", content: answer }]);
+      if (answer && userIdRef.current === initiatingUserId) {
+        update([...history, { role: "assistant", content: answer }]);
+      }
       setBusy(false);
       abortRef.current = null;
     }
