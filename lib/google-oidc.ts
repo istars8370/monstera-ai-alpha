@@ -70,3 +70,11 @@ export async function verifyGoogleIdToken(
   }
   return { email: claims.email.toLowerCase(), googleSubject: claims.sub };
 }
+
+export const FLOW_COOKIE_OPTIONS = {
+  httpOnly: true, sameSite: "lax" as const, secure: process.env.NODE_ENV === "production",
+  path: "/api/auth/google", maxAge: 600,
+};
+export const OAUTH_COOKIE_NAMES = {
+  state: "monstera_oauth_state", nonce: "monstera_oauth_nonce", verifier: "monstera_oauth_verifier",
+};
