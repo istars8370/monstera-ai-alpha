@@ -67,3 +67,14 @@ See db/migrations and tests for generated SQL and automated test cases.
 - Actual paid credit charging is still disabled. Billing replay mismatch fails closed.
 - Local IndexedDB content is plaintext and visible to the browser profile. The UI offers an explicit confirmed purge of all device chat records.
 - Staging preflight is offline only. See docs/MVP_RELEASE_GATES_v1.8.md and ALPHA_DEPLOY.md.
+
+
+## v1.9 staging/release status
+
+Current milestone: security and billing integrity fixes, disposable backup
+restore verification, and nonproduction provider-budget decision checklist.
+No live Google, Neon, Upstash or AI model usage; paid charging remains disabled.
+
+- [v1.9 staging and credit policy decisions](docs/STAGING_ACCEPTANCE_v1.9.md)
+- [v1.9 MVP Release Gate assessment](docs/MVP_RELEASE_GATES_v1.9.md)
+- [staging and incident runbook](ALPHA_DEPLOY.md)

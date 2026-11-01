@@ -50,3 +50,19 @@ database ownership or monetary provider limits.
 8. Keep release blocked until operator signs off on each remaining issue.
 
 See docs/MVP_RELEASE_GATES_v1.8.md for the current release gate criteria.
+
+
+## v1.9 added isolated recovery checks
+
+The integration workflow now uses \`pg_dump\` to back up its own ephemeral
+PostgreSQL service and restores the dump into a second disposable database.
+It checks that the five application tables, uniqueness constraints, credit
+balances, and settled ledger state survive restoration. This is **NOT** a
+backup of real Neon or evidence that a production restore is safe.
+
+For provider-side cost policy and credentials, see
+\`docs/STAGING_ACCEPTANCE_v1.9.md\`. Verified provider-side caps and consent
+are required before the first real API request. The operator can review
+OpenRouter's per-key USD \`limit\` and \`limit_reset\` settings and DeepInfra's
+published spend-limit options, but these features have **not** been configured
+or verified on the MONSTERA accounts.
