@@ -31,12 +31,12 @@ export async function authenticatedUser(request: NextRequest): Promise<Authentic
   const token = readSessionToken(request.cookies.get(SESSION_COOKIE)?.value, sessionSecret());
   if (!token) return null;
   const result = await getPool().query<{
-    id: string; tier: string; session_epoch: number; email_verified_at: Date | null;
+    id: string; tier: string; session_epoch: number; email_verified_at: Date | null; google_sub: string | null;
   }>(
-    "SELECT id, tier, session_epoch, email_verified_at FROM users WHERE id = $1 LIMIT 1",
+    "SELECT id, tier, session_epoch, email_verified_at, google_sub FROM users WHERE id = $1 LIMIT 1",
     [token.sub],
   );
   const user = result.rows[0];
-  if (!user || user.session_epoch !== token.epoch || !user.email_verified_at || !allowedTiers.has(user.tier as Tier)) return null;
+  if (!user || user.session_epoch !== token.epoch || !user.email_verified_at || !user.google_sub || !allowedTiers.has(user.tier as Tier)) return null;
   return { id: user.id, tier: user.tier as Tier };
 }

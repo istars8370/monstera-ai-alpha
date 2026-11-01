@@ -11,6 +11,8 @@ const bytea = customType<{ data: Uint8Array; driverData: Buffer }>({
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   email: varchar("email", { length: 320 }).notNull().unique(),
+  // Google OIDC sub is the immutable account identifier. Existing email-only users are NOT auto-linked.
+  googleSub: varchar("google_sub", { length: 255 }).unique(),
   tier: varchar("tier", { length: 32 }).notNull().default("free"),
   emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
   sessionEpoch: integer("session_epoch").notNull().default(0),
