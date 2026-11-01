@@ -4,7 +4,7 @@ import { approvedFreeModels, reserveAlphaRequest, type FreeModelRecord } from "@
 import { authenticatedUser } from "@/lib/auth";
 import { getPool } from "@/db/pool";
 import { DatabaseModelRegistry } from "@/lib/model-registry";
-import { ModelRouter } from "@/lib/router";
+import { ModelRouter, RouterError } from "@/lib/router";
 import { OpenRouterAdapter } from "@/lib/providers/openrouter";
 import { DeepInfraAdapter } from "@/lib/providers/deepinfra";
 import type { ChatMessage, ProviderAdapter } from "@/lib/providers/types";
@@ -98,8 +98,20 @@ export async function POST(request: NextRequest): Promise<Response> {
   if (process.env.MONSTERA_FREE_CHAT_ENABLED !== "true") {
     return Response.json({ code: "BILLING_POLICY_NOT_CONFIGURED" }, { status: 503 });
   }
+  const adapters: Record<string, ProviderAdapter> = {};
+  if (process.env.OPENROUTER_API_KEY) adapters.openrouter = new OpenRouterAdapter(process.env.OPENROUTER_API_KEY);
+  if (process.env.DEEPINFRA_API_KEY) adapters.deepinfra = new DeepInfraAdapter(process.env.DEEPINFRA_API_KEY);
+  if (Object.keys(adapters).length === 0) return Response.json({ code: "PROVIDER_NOT_CONFIGURED" }, { status: 503 });
+
+  const router = new ModelRouter(new DatabaseModelRegistry(), adapters);
+  const requestedModels = [parsed.modelId, ...(parsed.fallbackModelId ? [parsed.fallbackModelId] : [])];
   try {
-    const requestedModels = [parsed.modelId, ...(parsed.fallbackModelId ? [parsed.fallbackModelId] : [])];
+    await router.assertAccessible(requestedModels, user.tier);
+  } catch (error) {
+    if (error instanceof RouterError) return Response.json({ code: error.code }, { status: error.status });
+    return Response.json({ code: "MODELS_UNAVAILABLE" }, { status: 503 });
+  }
+  try {
     if (!(await zeroPriceModelsOnly(requestedModels))) {
       return Response.json({ code: "MODEL_REQUIRES_BILLING" }, { status: 403 });
     }
@@ -110,12 +122,6 @@ export async function POST(request: NextRequest): Promise<Response> {
     return Response.json({ code: "CHAT_UNAVAILABLE" }, { status: 503 });
   }
 
-  const adapters: Record<string, ProviderAdapter> = {};
-  if (process.env.OPENROUTER_API_KEY) adapters.openrouter = new OpenRouterAdapter(process.env.OPENROUTER_API_KEY);
-  if (process.env.DEEPINFRA_API_KEY) adapters.deepinfra = new DeepInfraAdapter(process.env.DEEPINFRA_API_KEY);
-  if (Object.keys(adapters).length === 0) return Response.json({ code: "PROVIDER_NOT_CONFIGURED" }, { status: 503 });
-
-  const router = new ModelRouter(new DatabaseModelRegistry(), adapters);
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), 90000);
   const onAbort = () => abort.abort();
