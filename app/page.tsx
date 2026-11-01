@@ -14,20 +14,20 @@ function openDb(): Promise<IDBDatabase> {
     req.onerror = () => reject(req.error);
   });
 }
-async function loadChat(): Promise<Message[]> {
+async function loadChat(userId: string): Promise<Message[]> {
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction("chat", "readonly");
-    const req = tx.objectStore("chat").get("messages");
+    const req = tx.objectStore("chat").get("messages:" + userId);
     req.onsuccess = () => { db.close(); resolve(Array.isArray(req.result) ? req.result : []); };
     req.onerror = () => { db.close(); reject(req.error); };
   });
 }
-async function saveChat(messages: Message[]): Promise<void> {
+async function saveChat(messages: Message[], userId: string): Promise<void> {
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction("chat", "readwrite");
-    tx.objectStore("chat").put(messages, "messages");
+    tx.objectStore("chat").put(messages, "messages:" + userId);
     tx.oncomplete = () => { db.close(); resolve(); };
     tx.onerror = () => { db.close(); reject(tx.error); };
   });
@@ -43,35 +43,50 @@ export default function HomePage() {
   const abortRef = useRef<AbortController | null>(null);
   const messagesRef = useRef<Message[]>([]);
 
+  const userIdRef = useRef<string | null>(null);
+
   useEffect(() => {
-    loadChat().then(items => {
-      messagesRef.current = items;
-      setMessages(items);
-      setNotice("");
-    }).catch(() => setNotice("로컬 기록 저장소를 사용할 수 없습니다."));
+    let cancelled = false;
     fetch("/api/models", { cache: "no-store" }).then(async response => {
       if (!response.ok) return null;
-      return await response.json() as { models?: ModelChoice[] };
-    }).then(data => {
-      if (Array.isArray(data?.models)) {
-        setSignedIn(true);
-        setModels(data.models);
-        setModelId(data.models[0]?.id ?? "");
+      return await response.json() as { userId?: string; models?: ModelChoice[] };
+    }).then(async data => {
+      if (cancelled) return;
+      if (!data || !data.userId || !Array.isArray(data.models)) {
+        setNotice("로그인 후 AI 모델과 대화할 수 있습니다.");
+        return;
       }
-    }).catch(() => undefined);
-    return () => abortRef.current?.abort();
+      userIdRef.current = data.userId;
+      setSignedIn(true);
+      setModels(data.models);
+      setModelId(data.models[0]?.id ?? "");
+      try {
+        const items = await loadChat(data.userId);
+        if (cancelled || userIdRef.current !== data.userId) return;
+        messagesRef.current = items;
+        setMessages(items);
+        setNotice(data.models.length ? "" : "사용 가능한 AI 모델이 없습니다.");
+      } catch {
+        if (!cancelled) setNotice("이 계정의 로컬 기록을 불러올 수 없습니다.");
+      }
+    }).catch(() => { if (!cancelled) setNotice("인증 또는 모델 조회에 실패했습니다."); });
+    return () => { cancelled = true; abortRef.current?.abort(); };
   }, []);
 
   const update = (items: Message[]) => {
     messagesRef.current = items;
     setMessages([...items]);
-    void saveChat(items).catch(() => setNotice("로컬 기록 저장 실패"));
+    const userId = userIdRef.current;
+    if (userId) void saveChat(items, userId).catch(() => setNotice("로컬 기록 저장 실패"));
   };
   async function logout() {
     if (busy) return;
     try {
       const response = await fetch("/api/auth/logout", { method: "POST" });
       if (!response.ok) throw new Error("LOGOUT_FAILED");
+      userIdRef.current = null;
+      messagesRef.current = [];
+      setMessages([]);
       setSignedIn(false);
       setModels([]);
       setModelId("");
