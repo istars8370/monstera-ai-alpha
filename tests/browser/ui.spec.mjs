@@ -244,3 +244,49 @@ test("shared-device privacy: explicitly purge all account histories after confir
   await page.reload();
   await expect(page.getByText("Alice local privacy")).toHaveCount(0);
 });
+
+
+test("privacy: deleting current account history removes only its IndexedDB record", async ({ page, context }) => {
+  const state = { user: alice, sent: [] };
+  await mockNetwork(context, state);
+  await page.goto("/");
+  await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await page.getByRole("textbox", { name: "메시지" }).fill("Alice must remain");
+  await page.getByRole("button", { name: "전송" }).click();
+  await expect(page.getByText("MOCK_REPLY:Alice must remain")).toBeVisible();
+
+  state.user = bob;
+  await page.reload();
+  await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await page.getByRole("textbox", { name: "메시지" }).fill("Bob must disappear");
+  await page.getByRole("button", { name: "전송" }).click();
+  await expect(page.getByText("MOCK_REPLY:Bob must disappear")).toBeVisible();
+
+  const deleteCurrent = page.getByRole("button", { name: "현재 계정 기록 삭제" });
+  page.once("dialog", dialog => dialog.dismiss());
+  await deleteCurrent.click();
+  await expect(page.getByText("MOCK_REPLY:Bob must disappear")).toBeVisible();
+
+  page.once("dialog", dialog => dialog.accept());
+  await deleteCurrent.click();
+  await expect(page.getByRole("status")).toContainText("현재 계정의 이 기기 대화 기록을 삭제했습니다");
+  await expect(page.getByText("Bob must disappear")).toHaveCount(0);
+
+  const records = await page.evaluate(() => new Promise((resolve, reject) => {
+    const request = indexedDB.open("monstera-alpha-local");
+    request.onsuccess = () => {
+      const db = request.result;
+      const transaction = db.transaction("chat", "readonly");
+      const store = transaction.objectStore("chat");
+      const keys = store.getAllKeys();
+      keys.onsuccess = () => { db.close(); resolve(keys.result); };
+      keys.onerror = () => reject(keys.error);
+    };
+    request.onerror = () => reject(request.error);
+  }));
+  expect(records).toContain("messages:" + alice);
+  expect(records).not.toContain("messages:" + bob);
+  state.user = alice;
+  await page.reload();
+  await expect(page.getByText("MOCK_REPLY:Alice must remain")).toBeVisible();
+});
