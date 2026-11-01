@@ -18,7 +18,8 @@ jobs:
         with:
           node-version: '22'
           cache: pnpm
-      # 잠금 파일은 다음 통합 단계에서 재생성해 고정한다.
-      - run: pnpm install --no-frozen-lockfile
+      # 잠금 파일이 package.json과 일치하지 않으면 즉시 실패한다.
+      - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
+      - run: pnpm lint
       - run: pnpm build
