@@ -173,3 +173,17 @@ test("route: invalid origins and oversized JSON are rejected before any provider
   assert.equal(large.status, 413);
   assert.equal(providerCalls.length, 0);
 });
+
+
+test("route: excessive provider output is terminated without emitting a successful done", async () => {
+  const frame = "data: " + JSON.stringify({ choices: [{ delta: { content: "x".repeat(9000) } }] }) + "\n\n";
+  globalThis.fetch = async () => new Response(frame.repeat(20) + "data: [DONE]\n\n", { status: 200 });
+  const response = await chat(request("/api/chat", alice, "POST", {
+    modelId: free, messages: userMessage,
+  }));
+  assert.equal(response.status, 200);
+  const output = await response.text();
+  assert.match(output, /CHAT_RESPONSE_TOO_LARGE/);
+  assert.doesNotMatch(output, /event: done/);
+  assert.ok(output.length < 160000);
+});

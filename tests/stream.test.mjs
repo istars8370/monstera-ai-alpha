@@ -20,3 +20,12 @@ test("SSE parser handles CRLF split between network chunks", async () => {
   for await (const event of parseSse(new Response(stream))) result.push(event);
   assert.deepEqual(result, [{ type: "delta", text: "hello" }, { type: "done" }]);
 });
+
+
+test("provider rejects oversized complete SSE frames before parsing JSON", async () => {
+  const large = 'data: {"choices":[{"delta":{"content":"' +
+    "x".repeat(140000) + '"}}]}\n\n' + 'data: [DONE]\n\n';
+  await assert.rejects(async () => {
+    for await (const event of parseSse(new Response(large))) void event;
+  }, /UPSTREAM_EVENT_TOO_LARGE/);
+});

@@ -136,6 +136,8 @@ export async function POST(request: NextRequest): Promise<Response> {
     async start(controller) {
       let closed = false;
       let doneSent = false;
+      let terminalSent = false;
+      let outputChars = 0;
       const write = (kind: string, data: object) => {
         if (closed || abort.signal.aborted) return;
         try { controller.enqueue(encoder.encode("event: " + kind + "\ndata: " + JSON.stringify(data) + "\n\n")); }
@@ -150,16 +152,27 @@ export async function POST(request: NextRequest): Promise<Response> {
           signal: abort.signal,
         })) {
           if (abort.signal.aborted) break;
-          if (chunk.type === "delta") write("delta", { text: chunk.text ?? "" });
+          if (chunk.type === "delta") {
+            const text = chunk.text ?? "";
+            outputChars += text.length;
+            if (outputChars > 131072) {
+              write("error", { code: "CHAT_RESPONSE_TOO_LARGE" });
+              terminalSent = true;
+              abort.abort();
+              break;
+            }
+            write("delta", { text });
+          }
           if (chunk.type === "done") {
             if (!doneSent) write("done", {});
             doneSent = true;
+            terminalSent = true;
             break;
           }
         }
-        if (!doneSent) write("error", { code: "CHAT_INTERRUPTED" });
+        if (!terminalSent) write("error", { code: "CHAT_INTERRUPTED" });
       } catch {
-        if (!doneSent) write("error", { code: "CHAT_FAILED" });
+        if (!terminalSent) write("error", { code: "CHAT_FAILED" });
       } finally {
         clearTimeout(timer);
         request.signal.removeEventListener("abort", onAbort);

@@ -16,6 +16,7 @@ export async function* parseSse(response: Response, signal?: AbortSignal): Async
       buffer = buffer.replace(/\r\n/g, "\n");
       let boundary: number;
       while ((boundary = buffer.indexOf("\n\n")) >= 0) {
+        if (boundary > 131072) throw new Error("UPSTREAM_EVENT_TOO_LARGE");
         const event = buffer.slice(0, boundary);
         buffer = buffer.slice(boundary + 2);
         const data = event.split("\n").filter(line => line.startsWith("data:")).map(line => line.slice(5).trimStart()).join("\n");
