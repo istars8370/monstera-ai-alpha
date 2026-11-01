@@ -119,3 +119,24 @@ jobs:
           done
           if [ "$READY" -ne 1 ]; then cat /tmp/monstera-http.log; exit 1; fi
           node --test tests/http-smoke.mjs
+
+  redis-smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test atomic Lua request caps without Upstash credentials
+        run: node --experimental-transform-types --test tests/redis-smoke.mjs
