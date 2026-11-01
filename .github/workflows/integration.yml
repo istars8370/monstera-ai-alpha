@@ -82,6 +82,32 @@ jobs:
           RESERVED=$($PSQL -tAc "SELECT reserved FROM credits WHERE user_id=(SELECT id FROM users WHERE email='concurrent-test@example.invalid');")
           test "$RESERVED" = '80'
 
+      - name: Validate disposable PostgreSQL backup and restore
+        run: |
+          set -euo pipefail
+          # Only the Docker service created for this CI job is ever backed up.
+          # This test never receives Neon or production database credentials.
+          docker run --rm --network host -e PGPASSWORD=ephemeral_only postgres:16 \
+            pg_dump -h 127.0.0.1 -U integration_user -d monstera_integration \
+              --no-owner --no-privileges --format=plain > /tmp/monstera-disposable-backup.sql
+          docker run --rm --network host -e PGPASSWORD=ephemeral_only postgres:16 \
+            psql -h 127.0.0.1 -U integration_user -d postgres -v ON_ERROR_STOP=1 \
+              -c 'CREATE DATABASE monstera_disposable_restore'
+          docker run --rm -i --network host -e PGPASSWORD=ephemeral_only postgres:16 \
+            psql -h 127.0.0.1 -U integration_user -d monstera_disposable_restore \
+              -v ON_ERROR_STOP=1 < /tmp/monstera-disposable-backup.sql
+          docker run --rm --network host -e PGPASSWORD=ephemeral_only postgres:16 \
+            psql -h 127.0.0.1 -U integration_user -d monstera_disposable_restore \
+              -v ON_ERROR_STOP=1 -tAc \
+              "SELECT CASE WHEN
+                 (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE') = 5
+                 AND (SELECT balance=80 AND reserved=0 FROM credits c JOIN users u ON u.id=c.user_id WHERE u.email='ledger-test@example.invalid')
+                 AND (SELECT reserved=80 FROM credits c JOIN users u ON u.id=c.user_id WHERE u.email='concurrent-test@example.invalid')
+                 AND (SELECT COUNT(*) FROM usage_ledger WHERE idem_key='request-1' AND status='settled') = 1
+                 AND (SELECT COUNT(*) FROM pg_constraint WHERE conname='users_google_sub_unique') = 1
+              THEN 'RESTORE_OK' ELSE 'RESTORE_FAILED' END" | grep -qx 'RESTORE_OK'
+
+
   http-smoke:
     runs-on: ubuntu-latest
     permissions:
