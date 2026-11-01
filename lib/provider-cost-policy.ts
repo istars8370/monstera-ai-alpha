@@ -105,3 +105,43 @@ export function withinSimulatedBudget(
   return estimate.estimatedMaximumMicroUsd <= maxRequestMicroUsd &&
     estimate.estimatedMaximumMicroUsd <= remainingDailyMicroUsd;
 }
+
+
+/**
+ * Trusted operator-maintained snapshot: model_registry's zero internal price
+ * MUST NOT be used as upstream-price evidence. Reject absent or stale snapshots.
+ */
+export function matchingReviewedProviderPrices(
+  json: string | undefined,
+  models: readonly { provider: string; upstream_id: string }[],
+  now: Date = new Date(),
+): ApprovedProviderPrice[] {
+  if (!json || json.length > 16000 || models.length < 1 || models.length > 2) {
+    throw new Error("PROVIDER_PRICE_POLICY_NOT_CONFIGURED");
+  }
+  let parsed: unknown;
+  try { parsed = JSON.parse(json); }
+  catch { throw new Error("PROVIDER_PRICE_POLICY_NOT_CONFIGURED"); }
+  if (!Array.isArray(parsed) || parsed.length > 100) {
+    throw new Error("PROVIDER_PRICE_POLICY_NOT_CONFIGURED");
+  }
+  const result: ApprovedProviderPrice[] = [];
+  for (const model of models) {
+    const matches = parsed.filter((item: unknown) => {
+      if (!item || typeof item !== "object") return false;
+      const candidate = item as Record<string, unknown>;
+      return candidate.provider === model.provider && candidate.model === model.upstream_id;
+    });
+    if (matches.length !== 1) throw new Error("PROVIDER_PRICE_MISSING_OR_DUPLICATE");
+    const price = matches[0] as ApprovedProviderPrice;
+    // A 24 KB request can approach 24K tokens plus provider framing; use a
+    // larger explicitly approved input ceiling rather than pretending text
+    // length or a local-zero price is a verified token count.
+    if (price.inputTokenCeiling < 25000 || price.outputTokenCeiling < 1024) {
+      throw new Error("PROVIDER_PRICE_CEILING_TOO_LOW");
+    }
+    estimateProviderMaximumCost(price, now);
+    result.push(price);
+  }
+  return result;
+}
