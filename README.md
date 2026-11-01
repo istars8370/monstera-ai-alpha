@@ -13,7 +13,7 @@ Next.js 15, TypeScript, Neon PostgreSQL/Drizzle, Upstash Redis, OpenRouter and D
     corepack pnpm test
     corepack pnpm build
 
-GitHub Actions executes these checks. A separate CI job applies committed Drizzle SQL to disposable PostgreSQL 16, checking five tables, constraints, idempotency and rollback. This does not certify Neon production migration.
+GitHub Actions executes these checks. The integration workflow also runs real localhost Next.js HTTP smoke tests, mocked Google OAuth / authenticated model + chat handlers, disposable Redis atomic-budget tests, and committed Drizzle SQL on disposable PostgreSQL 16. These tests do not certify live Google, Neon, Upstash or AI provider connectivity.
 
 ## Environment configuration
 
@@ -27,16 +27,18 @@ Copy .env.example to .env.local locally, and keep real values out of Git.
 - OPENROUTER_API_KEY / DEEPINFRA_API_KEY: server-side provider keys.
 - UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN: required for per-user rate limiting.
 - MONSTERA_FREE_CHAT_ENABLED=true: explicit opt-in for enabled zero-price-model alpha chat only. Default disabled.
+- MONSTERA_ALPHA_APPROVED_MODELS: comma-separated exact provider:model ID allowlist (e.g. openrouter:provider/model). Required even when DB price is zero.
+- MONSTERA_ALPHA_DAILY_REQUEST_CAP: positive integer 1..1000. Per-user limit is 10/min; global daily cap is atomic in Redis. Both fail closed when unavailable. **Request counts are NOT a monetary budget.**
 
 Even a zero-priced local model can incur upstream provider costs. Set operator-approved usage limits before enabling any real provider.
 
 ## Current product behavior
 
 1. Basic Auth protects the private alpha entry point; it is not multi-user authentication.
-2. Google OAuth uses state, nonce, PKCE and RSA-signed ID token verification. Verified email locates/creates a users record.
-3. Session identity and tier are derived from the server cookie and database, never from user ID or tier fields supplied by the client.
+2. Google OAuth uses HMAC-signed state, nonce, PKCE and RSA-signed ID token verification. Immutable Google subject (sub) identifies a user. Email-only legacy accounts or an email collision require a separate ownership-verified linking process; never auto-claim accounts by email. New users receive zero credits.
+3. Session identity and tier are derived from the signed server cookie and database, never from user ID or tier fields supplied by the client. Logout advances session_epoch, invalidating old sessions. A stale tab presenting another account's expected user ID is rejected (409).
 4. /api/models lists enabled models permitted by tier; /api/chat streams with OpenRouter and DeepInfra adapters.
-5. The model router only falls back before the first streamed chunk. Requests are size-limited, cancellable and rate-limited in explicitly enabled alpha mode.
+5. The model router only falls back before the first streamed chunk. Unknown/forbidden models return 404/403 before streaming. Requests are size-limited, cancellable and rate-limited in explicitly enabled alpha mode; output max_tokens is bounded at 1024.
 6. Conversation content is not intentionally persisted server-side. Browser chat content is stored in **plaintext IndexedDB**, keyed by authenticated user ID. It is not locally encrypted at rest.
 7. Application tables: users, credits, usage_ledger, model_registry, sync_blobs. Sync blobs must contain ciphertext from client-side encryption only.
 
@@ -44,9 +46,10 @@ Even a zero-priced local model can incur upstream provider costs. Set operator-a
 
 - Validate the full Google login round-trip and nonproduction Neon user lookup with real credentials.
 - Validate real provider responses, per-user rate limits, model access and cancellation.
-- Approve credit units/prices, then integrate transactional hold/settlement into the API. Current billing helpers are NOT an enabled or verified paid billing system.
+- Approve credit units/prices, then integrate transactional hold/settlement into the API and verify actual usage/cancellation with isolated test accounts. Current SQL and billing helper tests are **not** an enabled or verified paid billing system; real paid charges remain disabled.
 - Seed approved model registry entries; none are automatically enabled by default.
-- Review provider data processing, local storage privacy, account isolation and operational monitoring.
+- Approve a provider-specific upstream spending budget. Even zero-price registry models can generate provider charges; a count limit is not a spending ceiling.
+- Review provider data processing, local IndexedDB plaintext privacy, account isolation and operational monitoring.
 - Request explicit approval for main merge, production DB changes, deployment, actual payments and public launch.
 
 See db/migrations and tests for generated SQL and automated test cases.
