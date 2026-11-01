@@ -19,7 +19,7 @@ GitHub Actions runs frozen install/typecheck/lint/test/build, real localhost HTT
 
 - Browser suite: `pnpm exec playwright install --only-shell chromium` then start Next locally and run `pnpm exec playwright test --config=playwright.config.mjs`. CI runs the complete setup automatically.
 - Offline integration setup check: `node scripts/preflight.mjs` prints statuses only; it does not reveal secrets or contact providers.
-- Release readiness and blockers: [MVP Release Gates v1.7](docs/MVP_RELEASE_GATES_v1.7.md).
+- Release readiness and blockers: [MVP Release Gates v1.8](docs/MVP_RELEASE_GATES_v1.8.md).
 - Non-deployment operations checklist: [Operational Readiness Runbook](ALPHA_DEPLOY.md).
 
 ## Environment configuration
@@ -60,3 +60,10 @@ Even a zero-priced local model can incur upstream provider costs. Set operator-a
 - Request explicit approval for main merge, production DB changes, deployment, actual payments and public launch.
 
 See db/migrations and tests for generated SQL and automated test cases.
+
+## v1.8 safety and staging
+
+- Cost estimates are USD-micro *predictions*, not verified provider charges. Reviewed upstream prices, a separate operator-confirmed provider hard budget, and Redis call/estimated-cost caps are now mandatory for alpha provider dispatch.
+- Actual paid credit charging is still disabled. Billing replay mismatch fails closed.
+- Local IndexedDB content is plaintext and visible to the browser profile. The UI offers an explicit confirmed purge of all device chat records.
+- Staging preflight is offline only. See docs/MVP_RELEASE_GATES_v1.8.md and ALPHA_DEPLOY.md.
