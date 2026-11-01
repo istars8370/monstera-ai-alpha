@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
-import { googleOAuthConfig, FLOW_COOKIE_OPTIONS, OAUTH_COOKIE_NAMES } from "@/lib/google-oidc";
+import { googleOAuthConfig, signOAuthState, FLOW_COOKIE_OPTIONS, OAUTH_COOKIE_NAMES } from "@/lib/google-oidc";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,7 +9,9 @@ export function GET(): NextResponse {
   let config;
   try { config = googleOAuthConfig(); }
   catch { return NextResponse.json({ code: "AUTH_NOT_CONFIGURED" }, { status: 503 }); }
-  const state = randomBytes(32).toString("base64url");
+  const stateSecret = process.env.MONSTERA_SESSION_SECRET ?? "";
+  if (Buffer.byteLength(stateSecret, "utf8") < 32) return NextResponse.json({ code: "AUTH_NOT_CONFIGURED" }, { status: 503 });
+  const state = signOAuthState(randomBytes(32).toString("base64url"), stateSecret);
   const nonce = randomBytes(32).toString("base64url");
   const verifier = randomBytes(32).toString("base64url");
   const challenge = createHash("sha256").update(verifier).digest("base64url");
