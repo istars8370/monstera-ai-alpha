@@ -35,6 +35,7 @@ async function saveChat(messages: Message[], userId: string): Promise<void> {
 export default function HomePage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [models, setModels] = useState<ModelChoice[]>([]);
+  const [availableCredits, setAvailableCredits] = useState<number | null>(null);
   const [modelId, setModelId] = useState("");
   const [signedIn, setSignedIn] = useState(false);
   const [input, setInput] = useState("");
@@ -60,6 +61,12 @@ export default function HomePage() {
       setSignedIn(true);
       setModels(data.models);
       setModelId(data.models[0]?.id ?? "");
+      void fetch("/api/credits", { cache: "no-store" }).then(async response => {
+        if (!response.ok) return null;
+        return await response.json() as { available?: number };
+      }).then(balance => {
+        if (!cancelled && typeof balance?.available === "number") setAvailableCredits(balance.available);
+      }).catch(() => undefined);
       try {
         const items = await loadChat(data.userId);
         if (cancelled || userIdRef.current !== data.userId) return;
@@ -90,6 +97,7 @@ export default function HomePage() {
       setSignedIn(false);
       setModels([]);
       setModelId("");
+      setAvailableCredits(null);
       setNotice("로그아웃했습니다. 브라우저의 대화 기록은 유지됩니다.");
     } catch { setNotice("로그아웃 요청이 실패했습니다."); }
   }
@@ -171,6 +179,7 @@ export default function HomePage() {
             </>
           )}
         </div>
+        {signedIn && <p className="mt-2 text-sm text-slate-500">내부 크레딧 가용 잔액: {availableCredits ?? "조회 불가"} · 유료 정산 비활성화</p>}
       </header>
       <section className="space-y-4 min-h-80 mb-6" aria-label="대화">
         {messages.map((m, i) => (
