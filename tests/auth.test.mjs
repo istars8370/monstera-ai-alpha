@@ -14,7 +14,9 @@ test("session: correct signature, expiry and account epoch", () => {
   assert.equal(claims?.sub, uuid);
   assert.equal(claims?.epoch, 3);
   assert.equal(readSessionToken(token, secret, now + SESSION_LIFETIME_SECONDS + 1), null);
-  assert.equal(readSessionToken(token.replace(/.$/, "x"), secret, now), null);
+  const [body, signature] = token.split(".");
+  const tampered = body + "." + (signature[0] === "A" ? "B" : "A") + signature.slice(1);
+  assert.equal(readSessionToken(tampered, secret, now), null);
   assert.equal(readSessionToken(token, secret + "wrong", now), null);
   assert.equal(readSessionToken("not.a.valid.jwt", secret, now), null);
   assert.throws(() => createSessionToken(uuid, 0, "short", now), /SESSION_SECRET_TOO_SHORT/);
