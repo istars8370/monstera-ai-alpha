@@ -129,6 +129,7 @@ export default function HomePage() {
           messagesRef.current = [];
           setMessages([]);
           setSignedIn(false);
+          setInput("");
           setModels([]);
           setModelId("");
           setAvailableCredits(null);
@@ -162,6 +163,7 @@ export default function HomePage() {
       messagesRef.current = [];
       setMessages([]);
       setSignedIn(false);
+      setInput("");
       setModels([]);
       setModelId("");
       setAvailableCredits(null);
@@ -187,6 +189,7 @@ export default function HomePage() {
       await deleteAllLocalChat();
       messagesRef.current = [];
       setMessages([]);
+      setInput("");
       setNotice("이 기기의 모든 계정 대화 기록을 삭제했습니다.");
     } catch {
       setNotice("기기 기록 삭제에 실패했습니다. 브라우저 저장소 권한을 확인하세요.");
@@ -222,6 +225,7 @@ export default function HomePage() {
         messagesRef.current = [];
         setMessages([]);
         setSignedIn(false);
+        setInput("");
         setModels([]);
         setModelId("");
         setAvailableCredits(null);
