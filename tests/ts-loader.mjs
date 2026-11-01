@@ -3,7 +3,10 @@
 export async function resolve(specifier, context, nextResolve) {
   if (specifier === "next/server") return nextResolve("next/server.js", context);
   if (specifier === "@/db/pool") {
-    return nextResolve(new URL("./mocks/db-pool.mjs", import.meta.url).href, context);
+    // Billing uses a dedicated transactional mock; auth/chat use the existing identity mock.
+    const filename = context.parentURL?.endsWith("/lib/billing.ts")
+      ? "./mocks/billing-pool.mjs" : "./mocks/db-pool.mjs";
+    return nextResolve(new URL(filename, import.meta.url).href, context);
   }
   if (specifier === "@upstash/redis") {
     return nextResolve(new URL("./mocks/upstash.mjs", import.meta.url).href, context);
