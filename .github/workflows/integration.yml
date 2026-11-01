@@ -190,3 +190,31 @@ jobs:
           path: test-results/
           if-no-files-found: ignore
           retention-days: 3
+
+
+  container-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build release image using the pinned pnpm lockfile
+        run: docker build -t monstera-integration:ci .
+      - name: Verify private alpha routes in isolated container
+        run: |
+          set -euo pipefail
+          docker run -d --rm --name monstera-integration-ci -p 4307:3000 \
+            -e ALPHA_BASIC_USER=ci-alpha \
+            -e ALPHA_BASIC_PASSWORD=ci-only-alpha-password-not-a-real-secret \
+            monstera-integration:ci
+          trap 'docker rm -f monstera-integration-ci >/dev/null 2>&1 || true' EXIT
+          READY=0
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:4307/api/health >/dev/null; then READY=1; break; fi
+            sleep 1
+          done
+          if [ "$READY" -ne 1 ]; then docker logs monstera-integration-ci; exit 1; fi
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4307/)" = '401'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -u 'ci-alpha:ci-only-alpha-password-not-a-real-secret' http://127.0.0.1:4307/)" = '200'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -u 'ci-alpha:ci-only-alpha-password-not-a-real-secret' http://127.0.0.1:4307/api/models)" = '401'
