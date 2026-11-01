@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { Redis } from "@upstash/redis";
+import { approvedFreeModels, reserveAlphaRequest, type FreeModelRecord } from "@/lib/alpha-cost-control";
 import { authenticatedUser } from "@/lib/auth";
 import { getPool } from "@/db/pool";
 import { DatabaseModelRegistry } from "@/lib/model-registry";
@@ -54,28 +55,27 @@ function parseRequest(payload: unknown): ParsedChat {
   return { modelId: body.modelId, fallbackModelId: body.fallbackModelId as string | undefined, messages: entries as ChatMessage[] };
 }
 
-async function alphaRateLimit(userId: string): Promise<boolean> {
+async function reserveAlphaBudget(userId: string) {
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
   if (!url || !token) throw new Error("RATE_LIMIT_NOT_CONFIGURED");
   const redis = new Redis({ url, token });
-  const key = "monstera:alpha:chat:" + userId + ":" + Math.floor(Date.now() / 60000);
-  const count = await redis.eval(
-    "local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],70) end; return n",
-    [key], [],
+  return reserveAlphaRequest(
+    userId,
+    process.env.MONSTERA_ALPHA_DAILY_REQUEST_CAP,
+    (script, keys, args) => redis.eval(script, keys, args),
   );
-  return typeof count === "number" && count <= 10;
 }
 
-// Until credit units are approved, explicitly opt-in to rate-limited ZERO-price models only.
-// Never silently allow a paid model to skip credit reservation.
+// All selected primary and fallback models must be explicitly approved, enabled and
+// recorded as zero-price in our registry. This does NOT guarantee free upstream billing.
 async function zeroPriceModelsOnly(ids: string[]): Promise<boolean> {
-  const rows = await getPool().query<{ id: string; price_in: string; price_out: string }>(
-    "SELECT id, price_in, price_out FROM model_registry WHERE enabled = true AND id = ANY($1::uuid[])",
+  const rows = await getPool().query<FreeModelRecord>(
+    "SELECT id, provider, upstream_id, price_in, price_out FROM model_registry " +
+    "WHERE enabled = true AND id = ANY($1::uuid[])",
     [ids],
   );
-  return rows.rows.length === new Set(ids).size &&
-    rows.rows.every(row => Number(row.price_in) === 0 && Number(row.price_out) === 0);
+  return approvedFreeModels(rows.rows, ids, process.env.MONSTERA_ALPHA_APPROVED_MODELS);
 }
 
 export async function POST(request: NextRequest): Promise<Response> {
@@ -103,7 +103,9 @@ export async function POST(request: NextRequest): Promise<Response> {
     if (!(await zeroPriceModelsOnly(requestedModels))) {
       return Response.json({ code: "MODEL_REQUIRES_BILLING" }, { status: 403 });
     }
-    if (!(await alphaRateLimit(user.id))) return Response.json({ code: "RATE_LIMITED" }, { status: 429 });
+    const budget = await reserveAlphaBudget(user.id);
+    if (budget === "user_rate_limited") return Response.json({ code: "RATE_LIMITED" }, { status: 429 });
+    if (budget === "daily_limit_reached") return Response.json({ code: "DAILY_LIMIT_REACHED" }, { status: 429 });
   } catch {
     return Response.json({ code: "CHAT_UNAVAILABLE" }, { status: 503 });
   }
@@ -138,11 +140,15 @@ export async function POST(request: NextRequest): Promise<Response> {
         })) {
           if (abort.signal.aborted) break;
           if (chunk.type === "delta") write("delta", { text: chunk.text ?? "" });
-          if (chunk.type === "done") { write("done", {}); doneSent = true; }
+          if (chunk.type === "done") {
+            if (!doneSent) write("done", {});
+            doneSent = true;
+            break;
+          }
         }
         if (!doneSent) write("error", { code: "CHAT_INTERRUPTED" });
       } catch {
-        write("error", { code: "CHAT_FAILED" });
+        if (!doneSent) write("error", { code: "CHAT_FAILED" });
       } finally {
         clearTimeout(timer);
         request.signal.removeEventListener("abort", onAbort);
