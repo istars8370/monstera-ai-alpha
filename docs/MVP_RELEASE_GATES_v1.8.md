@@ -9,9 +9,13 @@ v1.7 HEAD 712131827d23d9aa9a309c0461d968889ba7b781:
 - PR CI https://github.com/istars8370/monstera-ai-alpha/actions/runs/41317965474
 - 53 unit/mock tests; 6 Chromium tests; 5 local HTTP tests; 6 integration jobs PASS.
 
-This is historical evidence only. v1.8 changes require a new successful CI run on the exact current HEAD.
+v1.8 verified checkpoint: SHA abe5fc1e7e31f97b1669b390860b1df111642e44.
+- CI https://github.com/istars8370/monstera-ai-alpha/actions/runs/41320237231 — PASS.
+- Integration https://github.com/istars8370/monstera-ai-alpha/actions/runs/41320232394 — PASS.
+- 63/63 unit/mock tests, 7/7 mocked Chromium, 6/6 integration jobs.
+This checkpoint is verified evidence, NOT blanket approval. If the branch changes, verify the newer HEAD again.
 
-## v1.8 changes pending latest-HEAD verification
+## v1.8 validated checkpoint changes
 
 - Require same-origin Origin header on POST /api/chat; fail closed if the public origin is unset in production.
 - Disclose plaintext IndexedDB and add confirmed purge of all account records on the device, serialized after pending writes.
@@ -25,7 +29,7 @@ This is historical evidence only. v1.8 changes require a new successful CI run o
 
 | Gate | Status | Evidence and blocker |
 | --- | --- | --- |
-| G1 Build | PASS v1.7; v1.8 pending | Frozen pnpm, TS, lint, tests and Next build at latest HEAD |
+| G1 Build | PASS at verified v1.8 checkpoint | Frozen pnpm, TS, lint, tests and Next build; newer commits require revalidation |
 | G2 Database | PARTIAL | Disposable PostgreSQL PASS; real nonproduction Neon unverified |
 | G3 Identity | PARTIAL | Mock Google OAuth, signed session and account isolation PASS; live login unverified |
 | G4 Chat | PARTIAL | Mock route and browser SSE tests PASS; real provider stream unverified |
