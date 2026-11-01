@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, sessionCookieOptions, authenticatedUser } from "@/lib/auth";
 import { getPool } from "@/db/pool";
+import { trustedOrigin } from "@/lib/request-origin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const origin = request.headers.get("origin");
-  if (!origin || origin !== request.nextUrl.origin) {
+  if (!trustedOrigin(request, true)) {
     return NextResponse.json({ code: "FORBIDDEN" }, { status: 403 });
   }
   let user;
