@@ -81,3 +81,41 @@ test("routing: caller cancellation does not try another provider", async () => {
   }, error => error instanceof RouterError && error.code === "STREAM_INTERRUPTED");
   assert.equal(fallbackInvoked, false);
 });
+
+
+test("routing: an adapter ignoring abort cannot hang initial fallback forever", async () => {
+  const router = new ModelRouter(registry, {
+    one: { async *chatStream() { await new Promise(() => {}); yield { type: "delta", text: "never" }; } },
+    two: { async *chatStream() { yield { type: "delta", text: "recovered" }; yield { type: "done" }; } },
+  }, 25);
+  const output = [];
+  for await (const chunk of router.chatStream({
+    modelId: "primary", fallbackModelId: "fallback", tier: "creator", messages,
+  })) output.push(chunk);
+  assert.deepEqual(output, [{ type: "delta", text: "recovered" }, { type: "done" }]);
+});
+
+test("routing: cancellation stops an uncooperative adapter after initial delta", async () => {
+  const controller = new AbortController();
+  let fallbackInvoked = false;
+  const router = new ModelRouter(registry, {
+    one: { async *chatStream() {
+      yield { type: "delta", text: "partial" };
+      await new Promise(() => {});
+      yield { type: "done" };
+    } },
+    two: { async *chatStream() { fallbackInvoked = true; yield { type: "done" }; } },
+  }, 25);
+  const output = [];
+  await assert.rejects(async () => {
+    for await (const chunk of router.chatStream({
+      modelId: "primary", fallbackModelId: "fallback", tier: "creator", messages,
+      signal: controller.signal,
+    })) {
+      output.push(chunk);
+      controller.abort();
+    }
+  }, error => error instanceof RouterError && error.code === "STREAM_INTERRUPTED");
+  assert.deepEqual(output, [{ type: "delta", text: "partial" }]);
+  assert.equal(fallbackInvoked, false);
+});
