@@ -1,0 +1,48 @@
+name: One-time integration lockfile repair
+
+on:
+  push:
+    branches:
+      - integration/t1-t12
+    paths:
+      - .github/workflows/lockfile-repair.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.repository == 'istars8370/monstera-ai-alpha' && github.ref == 'refs/heads/integration/t1-t12'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - name: Rebuild dependency lockfile
+        run: pnpm install --lockfile-only --no-frozen-lockfile
+      - name: Verify reproducible install
+        run: pnpm install --frozen-lockfile
+      - name: Validate TypeScript
+        run: pnpm typecheck
+      - name: Validate ESLint
+        run: pnpm lint
+      - name: Validate production build
+        run: pnpm build
+      - name: Commit repaired lockfile only
+        run: |
+          git add -- pnpm-lock.yaml
+          if git diff --cached --quiet; then
+            echo "No lockfile changes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(deps): regenerate pnpm lockfile for integration"
+          git push origin HEAD:integration/t1-t12
