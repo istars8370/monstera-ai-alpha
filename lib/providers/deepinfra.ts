@@ -8,7 +8,7 @@ export class DeepInfraAdapter implements ProviderAdapter {
     const response = await this.fetcher("https://api.deepinfra.com/v1/openai/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: req.model, messages: req.messages, stream: true, stream_options: { include_usage: true } }),
+      body: JSON.stringify({ model: req.model, messages: req.messages, stream: true, max_tokens: 1024, stream_options: { include_usage: true } }),
       signal: req.signal,
     });
     yield* parseSse(response, req.signal);

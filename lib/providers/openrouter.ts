@@ -42,7 +42,7 @@ export class OpenRouterAdapter implements ProviderAdapter {
   async *chatStream(req: ChatRequest): AsyncIterable<Chunk> {
     const response = await this.fetcher("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST", headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: req.model, messages: req.messages, stream: true, stream_options: { include_usage: true } }), signal: req.signal,
+      body: JSON.stringify({ model: req.model, messages: req.messages, stream: true, max_tokens: 1024, stream_options: { include_usage: true } }), signal: req.signal,
     });
     yield* parseSse(response, req.signal);
   }
