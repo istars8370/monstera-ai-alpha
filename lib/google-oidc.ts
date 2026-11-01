@@ -1,4 +1,4 @@
-import { createPublicKey, timingSafeEqual, verify as verifySignature } from "node:crypto";
+import { createHmac, createPublicKey, timingSafeEqual, verify as verifySignature } from "node:crypto";
 
 export interface GoogleOAuthConfig {
   clientId: string;
@@ -27,6 +27,24 @@ export function fixedTimeEqual(a: string | undefined, b: string | undefined): bo
   const right = Buffer.from(b, "utf8");
   return left.length === right.length && timingSafeEqual(left, right);
 }
+
+// A signed state proves that OAuth began behind the private alpha access gate.
+// The callback itself cannot require Basic credentials after a Google redirect.
+export function signOAuthState(random: string, secret: string): string {
+  if (!/^[A-Za-z0-9_-]{40,80}$/.test(random) || Buffer.byteLength(secret, "utf8") < 32) {
+    throw new Error("INVALID_OAUTH_STATE_SECRET");
+  }
+  const signature = createHmac("sha256", secret).update("monstera-oauth-state-v1:" + random).digest("base64url");
+  return random + "." + signature;
+}
+export function verifySignedOAuthState(value: string | undefined, secret: string): boolean {
+  if (!value || Buffer.byteLength(secret, "utf8") < 32) return false;
+  const parts = value.split(".");
+  if (parts.length !== 2) return false;
+  try { return fixedTimeEqual(value, signOAuthState(parts[0], secret)); }
+  catch { return false; }
+}
+
 export async function verifyGoogleIdToken(
   token: string, clientId: string, nonce: string, fetcher: typeof fetch = fetch, now = Math.floor(Date.now() / 1000),
 ): Promise<{ email: string; googleSubject: string }> {
