@@ -1,0 +1,48 @@
+name: Wallet schema generation and offline verification
+on:
+  push:
+    branches: [feat/wallet-siws]
+concurrency:
+  group: \${{ github.workflow }}-\${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: write
+jobs:
+  verify-and-generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: corepack pnpm install --frozen-lockfile
+      - name: Generate wallet migration via drizzle-kit (no external DB)
+        run: CI=true corepack pnpm exec drizzle-kit generate --config=drizzle.config.ts
+      - name: Emit generated migration blobs for audit and fallback upload
+        run: |
+          set -eu
+          git status --porcelain --untracked-files=all -- db/migrations | cut -c4- | while IFS= read -r file; do
+            test -n "$file" || continue
+            printf 'GENERATED_BLOB:%s:%s\n' "$file" "$(base64 -w0 "$file")"
+          done
+      - run: corepack pnpm typecheck
+      - run: corepack pnpm lint
+      - run: corepack pnpm test
+      - run: corepack pnpm build
+      - name: Commit machine-generated migrations to this feature branch only
+        run: |
+          set -eu
+          git add db/migrations
+          if ! git diff --cached --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "feat(wallet): generate Drizzle migration for linked wallets and grants"
+            git push origin HEAD:feat/wallet-siws
+          fi
