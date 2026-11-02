@@ -357,3 +357,59 @@ test("privacy: switching accounts and logout discard the previous user's unsent 
   await expect(page.getByRole("link", { name: "Google로 로그인" })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "메시지" })).toHaveValue("");
 });
+
+
+test("legacy plaintext is preserved while locked, then migrated to encrypted v2 on unlock", async ({ page, context }) => {
+  const state = { user: alice, sent: [] };
+  await mockNetwork(context, state);
+  await page.goto("/");
+  await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  const legacy = [{ role: "user", content: "old local private text" }];
+  await page.evaluate(({ account, records }) => new Promise((resolve, reject) => {
+    const request = indexedDB.open("monstera-alpha-local", 1);
+    request.onupgradeneeded = () => request.result.createObjectStore("chat");
+    request.onsuccess = () => {
+      const db = request.result;
+      const tx = db.transaction("chat", "readwrite");
+      tx.objectStore("chat").put(records, "messages:" + account);
+      tx.oncomplete = () => { db.close(); resolve(null); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
+    };
+    request.onerror = () => reject(request.error);
+  }), { account: alice, records: legacy });
+  // 잠긴 상태에서 채팅을 전송해도 기존 평문 레코드를 덮어쓰지 않는다.
+  await page.getByRole("textbox", { name: "메시지" }).fill("not persisted while locked");
+  await page.getByRole("button", { name: "전송" }).click();
+  await expect(page.getByText("MOCK_REPLY:not persisted while locked")).toBeVisible();
+  const before = await page.evaluate(account => new Promise((resolve, reject) => {
+    const request = indexedDB.open("monstera-alpha-local", 1);
+    request.onsuccess = () => {
+      const db = request.result;
+      const get = db.transaction("chat", "readonly").objectStore("chat").get("messages:" + account);
+      get.onsuccess = () => { db.close(); resolve(get.result); };
+      get.onerror = () => reject(get.error);
+    };
+    request.onerror = () => reject(request.error);
+  }), alice);
+  expect(before).toEqual(legacy);
+  await unlock(page);
+  await expect(page.getByText("old local private text")).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("기존 평문 기록 1개를 암호화했습니다");
+  const encrypted = await page.evaluate(account => new Promise((resolve, reject) => {
+    const request = indexedDB.open("monstera-alpha-local", 2);
+    request.onsuccess = () => {
+      const db = request.result;
+      const get = db.transaction("chat", "readonly").objectStore("chat").get("messages:" + account);
+      get.onsuccess = () => { db.close(); resolve(get.result); };
+      get.onerror = () => reject(get.error);
+    };
+    request.onerror = () => reject(request.error);
+  }), alice);
+  expect(encrypted.v).toBe(2);
+  expect(encrypted.nonce.length).toBe(24);
+  expect(JSON.stringify(encrypted)).not.toContain("old local private text");
+  await page.reload();
+  await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await unlock(page);
+  await expect(page.getByText("old local private text")).toBeVisible();
+});
