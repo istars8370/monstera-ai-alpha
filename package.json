@@ -20,6 +20,7 @@
     "drizzle-orm": "^0.44.0",
     "idb": "^8.0.0",
     "libsodium-wrappers": "^0.7.15",
+    "libsodium-wrappers-sumo": "0.7.16",
     "lucide-react": "^0.468.0",
     "next": "15.5.12",
     "react": "^19.0.0",
