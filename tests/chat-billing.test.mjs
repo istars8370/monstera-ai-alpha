@@ -2,11 +2,12 @@ import test, { beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server.js";
 import { POST as chat } from "../app/api/chat/route.ts";
+import { POST as manualReclaim } from "../app/api/internal/credits/reclaim/route.ts";
 import { createSessionToken } from "../lib/session-token.ts";
 import { holdCredits, settleCredits } from "../lib/billing.ts";
 import { matchingReviewedProviderPrices, estimateRouteMaximumCost } from "../lib/provider-cost-policy.ts";
 import { resetTestDb, addUser, addModel } from "./mocks/db-pool.mjs";
-import { resetBillingMock, seedBillingCredit, billingCredit, billingLedger, failNextBillingQuery } from "./mocks/billing-pool.mjs";
+import { resetBillingMock, seedBillingCredit, billingCredit, billingLedger, failNextBillingQuery, expireBillingLedger } from "./mocks/billing-pool.mjs";
 import { resetTestRedis } from "./mocks/upstash.mjs";
 
 const alice = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -57,6 +58,7 @@ beforeEach(() => {
   process.env.MONSTERA_SESSION_SECRET = secret;
   process.env.MONSTERA_FREE_CHAT_ENABLED = "true";
   process.env.MONSTERA_INTERNAL_CREDIT_TEST_MODE = "true";
+  process.env.MONSTERA_RECLAIM_OPERATOR_KEY = "mock-only-manual-credit-reclaim-token-long-1234";
   process.env.OPENROUTER_API_KEY = "mock-never-use-live";
   delete process.env.DEEPINFRA_API_KEY;
   process.env.UPSTASH_REDIS_REST_URL = "https://test-only.invalid";
@@ -171,4 +173,25 @@ test("billing chat: internal credit test switch is always disabled in production
     if (previous === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = previous;
   }
+});
+
+
+test("billing maintenance: operator-only manual reclaim uses existing helper and rejects bad tokens", async () => {
+  await holdCredits(initialHold());
+  expireBillingLedger(alice, requestId);
+  const endpoint = origin + "/api/internal/credits/reclaim";
+  const invalid = await manualReclaim(new NextRequest(endpoint, {
+    method: "POST", headers: { origin, authorization: "Bearer wrong-token" },
+  }));
+  assert.equal(invalid.status, 401);
+  assert.equal(billingLedger(alice, requestId).status, "held");
+  const valid = await manualReclaim(new NextRequest(endpoint, {
+    method: "POST", headers: {
+      origin, authorization: "Bearer " + process.env.MONSTERA_RECLAIM_OPERATOR_KEY,
+    },
+  }));
+  assert.equal(valid.status, 200);
+  assert.deepEqual(await valid.json(), { reclaimed: 1 });
+  assert.equal(billingLedger(alice, requestId).status, "reclaimed");
+  assert.deepEqual(billingCredit(alice), { balance: 100000, reserved: 0 });
 });

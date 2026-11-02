@@ -2,6 +2,9 @@ name: Offline feature verification
 on:
   push:
     branches: [feat/billing-wiring, feat/wallet-siws, feat/client-encryption]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
