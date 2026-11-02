@@ -26,7 +26,7 @@ function request(path, userId, method = "GET", payload, extra = {}) {
     method,
     headers: {
       ...(userId ? { cookie: session(userId) } : {}),
-      ...(method === "POST" ? { origin: base, "content-type": "application/json" } : {}),
+      ...(method === "POST" ? { origin: base, "content-type": "application/json", "x-monstera-request-id": "77777777-7777-4777-8777-777777777777" } : {}),
       ...extra,
     },
     ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
@@ -46,6 +46,7 @@ beforeEach(() => {
   process.env.UPSTASH_REDIS_REST_URL = "https://no-network.invalid";
   process.env.UPSTASH_REDIS_REST_TOKEN = "fake-no-network-redis";
   process.env.MONSTERA_ALPHA_DAILY_REQUEST_CAP = "100";
+  process.env.MONSTERA_INTERNAL_CREDIT_TEST_MODE = "false";
   process.env.MONSTERA_REDIS_NAMESPACE = "monstera:unit-alpha";
   process.env.MONSTERA_PROVIDER_SPENDING_LIMIT_CONFIRMED = "true"; // CI mock, not an actual provider budget
   process.env.MONSTERA_ALPHA_ESTIMATED_MICRO_USD_PER_DAY = "1000000";
