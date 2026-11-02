@@ -66,7 +66,7 @@ See db/migrations and tests for generated SQL and automated test cases. Release-
 - Cost estimates are USD-micro *predictions*, not verified provider charges. Reviewed upstream prices, a separate operator-confirmed provider hard budget, and Redis call/estimated-cost caps are now mandatory for alpha provider dispatch.
 - Actual paid credit charging is still disabled. Billing replay mismatch fails closed.
 - Local IndexedDB content is plaintext and visible to the browser profile. The UI offers an explicit confirmed purge of all device chat records.
-- Staging preflight is offline only. See docs/RELEASE_GATES.md and docs/RELEASE_GATES.md.
+- Staging preflight is offline only. See [release gates](docs/RELEASE_GATES.md).
 
 
 ## Current staging/release status
