@@ -3,7 +3,7 @@ on:
   push:
     branches: [feat/wallet-siws]
 concurrency:
-  group: \${{ github.workflow }}-\${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 permissions:
   contents: write

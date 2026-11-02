@@ -80,7 +80,7 @@ export function verifyWalletChallenge(
   if (!payload || typeof payload !== "object") return null;
   const value = payload as Partial<WalletChallenge>;
   if (typeof value.nonce !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(value.nonce) ||
-      !Number.isSafeInteger(value.issuedAt) || typeof value.issuedAt !== "number" ||
+      typeof value.issuedAt !== "number" || !Number.isSafeInteger(value.issuedAt) ||
       typeof value.domain !== "string" ||
       now < value.issuedAt || now - value.issuedAt > NONCE_TTL_MS ||
       value.domain !== walletOrigin().host) return null;

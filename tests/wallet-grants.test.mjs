@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import nacl from "tweetnacl";
 import { NextRequest } from "next/server.js";
 import { POST as grant } from "../app/api/credits/grant/route.ts";
+import { GET as credits } from "../app/api/credits/route.ts";
 import { authenticatedUser } from "../lib/auth.ts";
 import { createSessionToken } from "../lib/session-token.ts";
 import { resetTestDb, addUser, addCredits, findUserByGoogleSub, grantDays } from "./mocks/db-pool.mjs";
@@ -67,6 +68,8 @@ test("wallet daily grants: two same-day POSTs increase balance exactly once", as
   assert.deepEqual(await second.json(), { tier: "creator", granted: 0, alreadyGranted: true });
   assert.equal(grantDays(id).length, 1);
   assert.equal(findUserByGoogleSub("wallet-google-linked").tier, "creator");
+  const balance = await credits(new NextRequest(origin + "/api/credits", { headers: { cookie: "monstera_session=" + createSessionToken(id, 1, secret) } }));
+  assert.deepEqual(await balance.json(), { balance: 505, reserved: 30, available: 475 });
   const nextRequest = await authenticatedUser(request());
   assert.equal(nextRequest?.tier, "creator");
 });
@@ -81,6 +84,8 @@ test("wallet daily grants: Solana RPC failure forces free and issues zero credit
   const user = findUserByGoogleSub("wallet-google-linked");
   assert.equal(user.tier, "free");
   assert.equal(grantDays(id).length, 0);
+  const balance = await credits(new NextRequest(origin + "/api/credits", { headers: { cookie: "monstera_session=" + createSessionToken(id, 1, secret) } }));
+  assert.deepEqual(await balance.json(), { balance: 500, reserved: 30, available: 470 });
   const token = await authenticatedUser(request());
   assert.equal(token?.tier, "free");
 });
