@@ -163,7 +163,10 @@ test("billing chat: invalid request ID is rejected and cannot allocate hold", as
 
 test("billing chat: internal credit test switch is always disabled in production", async () => {
   const previous = process.env.NODE_ENV;
+  const priorOrigin = process.env.MONSTERA_PUBLIC_ORIGIN;
+  // 운영 모드 Origin 검사가 먼저 성공해야 별도 유료 정산 차단 분기가 검증된다.
   process.env.NODE_ENV = "production";
+  process.env.MONSTERA_PUBLIC_ORIGIN = origin;
   try {
     const response = await chat(request());
     assert.equal(response.status, 503);
@@ -172,6 +175,8 @@ test("billing chat: internal credit test switch is always disabled in production
   } finally {
     if (previous === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = previous;
+    if (priorOrigin === undefined) delete process.env.MONSTERA_PUBLIC_ORIGIN;
+    else process.env.MONSTERA_PUBLIC_ORIGIN = priorOrigin;
   }
 });
 
