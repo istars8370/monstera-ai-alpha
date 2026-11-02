@@ -136,7 +136,7 @@ export async function loadChat(userId: string): Promise<LocalChatMessage[]> {
   if (!isMessageList(result)) throw new Error("INVALID_DECRYPTED_DATA");
   return result;
 }
-export function saveChat(messages: LocalChatMessage[], userId: string): Promise<void> {
+export async function saveChat(messages: LocalChatMessage[], userId: string): Promise<void> {
   // 암호화 키 없이 IndexedDB에 평문을 저장하지 않는다.
   const key = currentKey();
   if (!isMessageList(messages)) return Promise.reject(new Error("INVALID_MESSAGES"));

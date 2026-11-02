@@ -69,7 +69,9 @@ export async function encryptRecord(
 ): Promise<EncryptedRecord> {
   const locked = requireKey(key);
   const sodiumReady = await ready();
-  const message = new TextEncoder().encode(JSON.stringify(value));
+  const serialized = JSON.stringify(value);
+  if (typeof serialized !== "string") throw new Error("INVALID_ENCRYPTED_DATA");
+  const message = new TextEncoder().encode(serialized);
   if (message.length > 1024 * 1024 - 16) throw new Error("LOCAL_RECORD_TOO_LARGE");
   const nonce = sodiumReady.randombytes_buf(NONCE_BYTES);
   const ciphertext = sodiumReady.crypto_aead_xchacha20poly1305_ietf_encrypt(
