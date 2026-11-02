@@ -88,4 +88,4 @@ corepack pnpm build
 - **v1.9 최종** — \`0d0f9d7\`; [CI 41323485219](https://github.com/istars8370/monstera-ai-alpha/actions/runs/41323485219), [통합 41323481785](https://github.com/istars8370/monstera-ai-alpha/actions/runs/41323481785), 모두 성공.
 - **v2.0** — \`d06f557\`; 다음 두 런은 최종 확인 당시 **queued / PASS 미확정**: [CI 41388795431](https://github.com/istars8370/monstera-ai-alpha/actions/runs/41388795431), [통합 41388790509](https://github.com/istars8370/monstera-ai-alpha/actions/runs/41388790509).
 
-이력 문서의 원문은 [archive](archive/)에 Git 기록과 함께 보관한다. 새 버전 릴리스 게이트 파일은 생성하지 않는다.
+이력 문서의 원문은 [archive](archive/MVP_RELEASE_GATES_v2.0.md)에 Git 기록과 함께 보관한다. 새 버전 릴리스 게이트 파일은 생성하지 않는다.
