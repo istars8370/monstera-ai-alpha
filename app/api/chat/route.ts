@@ -3,6 +3,7 @@ import { trustedOrigin } from "@/lib/request-origin";
 import { Redis } from "@upstash/redis";
 import { approvedFreeModels, reserveAlphaRequest, reserveEstimatedDailyBudget, type FreeModelRecord } from "@/lib/alpha-cost-control";
 import { matchingReviewedProviderPrices, estimateRouteMaximumCost } from "@/lib/provider-cost-policy";
+import { holdCredits, settleCredits } from "@/lib/billing";
 import { authenticatedUser } from "@/lib/auth";
 import { getPool } from "@/db/pool";
 import { DatabaseModelRegistry } from "@/lib/model-registry";
@@ -124,6 +125,15 @@ export async function POST(request: NextRequest): Promise<Response> {
   if (process.env.MONSTERA_FREE_CHAT_ENABLED !== "true") {
     return Response.json({ code: "BILLING_POLICY_NOT_CONFIGURED" }, { status: 503 });
   }
+  // 서버에서 활성화된 격리 테스트에만 원장 연결을 허용한다. 운영 과금은 비활성화한다.
+  const billingRequested = process.env.MONSTERA_INTERNAL_CREDIT_TEST_MODE === "true";
+  if (billingRequested && process.env.NODE_ENV === "production") {
+    return Response.json({ code: "CREDIT_BILLING_NOT_APPROVED" }, { status: 503 });
+  }
+  const requestId = request.headers.get("x-monstera-request-id");
+  if (!requestId || !UUID.test(requestId)) {
+    return Response.json({ code: "INVALID_REQUEST_ID" }, { status: 400 });
+  }
   const adapters: Record<string, ProviderAdapter> = {};
   if (process.env.OPENROUTER_API_KEY) adapters.openrouter = new OpenRouterAdapter(process.env.OPENROUTER_API_KEY);
   if (process.env.DEEPINFRA_API_KEY) adapters.deepinfra = new DeepInfraAdapter(process.env.DEEPINFRA_API_KEY);
@@ -137,6 +147,8 @@ export async function POST(request: NextRequest): Promise<Response> {
     if (error instanceof RouterError) return Response.json({ code: error.code }, { status: error.status });
     return Response.json({ code: "MODELS_UNAVAILABLE" }, { status: 503 });
   }
+  let reservedAmount = 0;
+  let outputMicroUsdPerMillion = 0;
   try {
     const models = await approvedModelRows(requestedModels);
     if (!models) return Response.json({ code: "MODEL_REQUIRES_BILLING" }, { status: 403 });
@@ -144,7 +156,43 @@ export async function POST(request: NextRequest): Promise<Response> {
     if (budget === "user_rate_limited") return Response.json({ code: "RATE_LIMITED" }, { status: 429 });
     if (budget === "daily_limit_reached") return Response.json({ code: "DAILY_LIMIT_REACHED" }, { status: 429 });
     if (budget === "estimated_budget_exceeded") return Response.json({ code: "ESTIMATED_BUDGET_EXCEEDED" }, { status: 429 });
-  } catch {
+    if (billingRequested) {
+      // 모의 지출 단위는 USD-micro이다. 실제 사용자 과금 단위로 전환하지 않는다.
+      const ordered = requestedModels.map(id => models.find(model => model.id === id));
+      if (ordered.some(model => !model)) throw new Error("INVALID_BILLING_MODEL");
+      const snapshots = matchingReviewedProviderPrices(
+        process.env.MONSTERA_ALPHA_PROVIDER_PRICES_JSON, ordered as FreeModelRecord[],
+      );
+      reservedAmount = estimateRouteMaximumCost(snapshots).estimatedMaximumMicroUsd;
+      if (!Number.isSafeInteger(reservedAmount) || reservedAmount > 2147483647) {
+        throw new Error("INVALID_HOLD");
+      }
+      // 라우터는 폴백된 모델 ID를 usage에 포함하지 않는다. 비용 과소평가 방지를
+      // 위해 청구는 두 모델 중 큰 출력 단가를 사용한다(운영 과금 금지).
+      outputMicroUsdPerMillion = Math.max(...snapshots.map(item => item.outputMicroUsdPerMillion));
+      if (reservedAmount > 0) {
+        const held = await holdCredits({
+          userId: user.id, requestId, model: requestedModels.join("|"),
+          reserved: reservedAmount, priceSnapshot: JSON.stringify(snapshots),
+        });
+        if (held.status === "insufficient") {
+          return Response.json({ code: "INSUFFICIENT_CREDITS" }, { status: 402 });
+        }
+        if (held.status === "duplicate_held") {
+          return Response.json({ code: "DUPLICATE_IN_FLIGHT" }, { status: 409 });
+        }
+        if (held.status === "settled") {
+          return Response.json({ code: "ALREADY_SETTLED", charged: held.charged }, { status: 409 });
+        }
+        if (held.status === "reclaimed") {
+          return Response.json({ code: "RESERVATION_RECLAIMED" }, { status: 409 });
+        }
+      }
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message === "IDEMPOTENCY_KEY_REUSED") {
+      return Response.json({ code: "IDEMPOTENCY_KEY_REUSED" }, { status: 409 });
+    }
     return Response.json({ code: "CHAT_UNAVAILABLE" }, { status: 503 });
   }
 
@@ -156,9 +204,10 @@ export async function POST(request: NextRequest): Promise<Response> {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       let closed = false;
-      let doneSent = false;
-      let terminalSent = false;
+      let completed = false;
+      let sentError = false;
       let outputChars = 0;
+      let usageOutputTokens: number | null = null;
       const write = (kind: string, data: object) => {
         if (closed || abort.signal.aborted) return;
         try { controller.enqueue(encoder.encode("event: " + kind + "\ndata: " + JSON.stringify(data) + "\n\n")); }
@@ -173,31 +222,59 @@ export async function POST(request: NextRequest): Promise<Response> {
           signal: abort.signal,
         })) {
           if (abort.signal.aborted) break;
+          if (chunk.type === "usage") {
+            const tokens = chunk.usage?.outputTokens;
+            if (tokens !== undefined && Number.isSafeInteger(tokens) && tokens >= 0) {
+              usageOutputTokens = tokens;
+            }
+          }
           if (chunk.type === "delta") {
             const text = chunk.text ?? "";
             outputChars += text.length;
             if (outputChars > 131072) {
               write("error", { code: "CHAT_RESPONSE_TOO_LARGE" });
-              terminalSent = true;
+              sentError = true;
               abort.abort();
               break;
             }
             write("delta", { text });
           }
-          if (chunk.type === "done") {
-            if (!doneSent) write("done", {});
-            doneSent = true;
-            terminalSent = true;
-            break;
+          if (chunk.type === "done") { completed = true; break; }
+        }
+        if (!completed && !sentError && !abort.signal.aborted) {
+          write("error", { code: "CHAT_INTERRUPTED" });
+          sentError = true;
+        }
+      } catch {
+        if (!sentError && !abort.signal.aborted) {
+          write("error", { code: "CHAT_FAILED" });
+          sentError = true;
+        }
+      } finally {
+        if (billingRequested && reservedAmount > 0) {
+          try {
+            // 출력이 전혀 없다면 첫 청크 이전 취소와 동일하게 0으로 정산한다.
+            // usage 부재 시 1문자=1토큰으로 보수적으로 추정하고 예약 상한으로 제한한다.
+            const billedTokens = outputChars === 0 ? 0 : (usageOutputTokens ?? outputChars);
+            const micros = (BigInt(billedTokens) * BigInt(outputMicroUsdPerMillion) + 999999n) / 1000000n;
+            const charged = Number(micros > BigInt(reservedAmount) ? BigInt(reservedAmount) : micros);
+            const settled = await settleCredits(user.id, requestId!, charged);
+            if (settled.status !== "settled") {
+              if (!sentError) write("error", { code: "SETTLEMENT_SKIPPED" });
+              sentError = true;
+            }
+          } catch (error) {
+            const code = error instanceof Error && /^[A-Z0-9_]+$/.test(error.message)
+              ? error.message : "SETTLEMENT_FAILED";
+            console.error(code, requestId);
+            if (!sentError) write("error", { code: "SETTLEMENT_FAILED" });
+            sentError = true;
           }
         }
-        if (!terminalSent) write("error", { code: "CHAT_INTERRUPTED" });
-      } catch {
-        if (!terminalSent) write("error", { code: "CHAT_FAILED" });
-      } finally {
+        if (completed && !sentError) write("done", {});
         clearTimeout(timer);
         request.signal.removeEventListener("abort", onAbort);
-        if (!closed) { closed = true; try { controller.close(); } catch { /* cancelled */ } }
+        if (!closed) { closed = true; try { controller.close(); } catch { /* 클라이언트 취소 */ } }
       }
     },
     cancel() { abort.abort(); clearTimeout(timer); request.signal.removeEventListener("abort", onAbort); },
