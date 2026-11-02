@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign } from "node:crypto";
 import { createSessionToken, readSessionToken, SESSION_LIFETIME_SECONDS } from "../lib/session-token.ts";
-import { fixedTimeEqual, signOAuthState, verifySignedOAuthState, verifyGoogleIdToken } from "../lib/google-oidc.ts";
+import { fixedTimeEqual, signOAuthState, verifySignedOAuthState, verifyGoogleIdToken, googleOAuthConfig } from "../lib/google-oidc.ts";
 
 const uuid = "12345678-1234-4234-a234-123456789abc";
 const secret = "local-only-test-secret-with-more-than-32-chars";
@@ -65,4 +65,31 @@ test("OAuth: callback requires signed state from a Basic-protected initiation", 
   assert.equal(verifySignedOAuthState("R".repeat(43), secret), false);
   assert.equal(verifySignedOAuthState(state, "short"), false);
   assert.throws(() => signOAuthState("short", secret), /INVALID_OAUTH_STATE_SECRET/);
+});
+
+
+test("OAuth: production origin rejects even localhost HTTP while development permits it", () => {
+  const original = {
+    node: process.env.NODE_ENV, origin: process.env.MONSTERA_PUBLIC_ORIGIN,
+    client: process.env.GOOGLE_CLIENT_ID, secret: process.env.GOOGLE_CLIENT_SECRET,
+  };
+  process.env.GOOGLE_CLIENT_ID = "test-client";
+  process.env.GOOGLE_CLIENT_SECRET = "mock-only-test-secret";
+  try {
+    process.env.MONSTERA_PUBLIC_ORIGIN = "http://localhost:3000";
+    process.env.NODE_ENV = "development";
+    assert.equal(googleOAuthConfig().redirectUri, "http://localhost:3000/api/auth/google/callback");
+    process.env.NODE_ENV = "production";
+    assert.throws(() => googleOAuthConfig(), /INVALID_PUBLIC_ORIGIN/);
+    process.env.MONSTERA_PUBLIC_ORIGIN = "https://staging.example.invalid";
+    assert.equal(googleOAuthConfig().redirectUri, "https://staging.example.invalid/api/auth/google/callback");
+  } finally {
+    for (const [name, value] of [
+      ["NODE_ENV", original.node], ["MONSTERA_PUBLIC_ORIGIN", original.origin],
+      ["GOOGLE_CLIENT_ID", original.client], ["GOOGLE_CLIENT_SECRET", original.secret],
+    ]) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
 });

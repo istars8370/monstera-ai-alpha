@@ -11,6 +11,15 @@ function validUrl(value, protocols, allowLocal = false) {
       !parsed.username && !parsed.password;
   } catch { return false; }
 }
+function validRedirectUri(origin, declared) {
+  if (!validUrl(origin, ["https:"]) || !declared) return false;
+  try {
+    const actual = new URL(origin);
+    const redirect = new URL(declared);
+    return redirect.href === actual.origin + "/api/auth/google/callback" &&
+      redirect.protocol === "https:" && !redirect.hash && !redirect.search;
+  } catch { return false; }
+}
 function validDatabaseUrl(value, expectedDb) {
   try {
     const parsed = new URL(value);
@@ -58,6 +67,7 @@ export function inspectIntegrationConfig(env = process.env) {
     { name: "basic_alpha_gate", ready: !!env.ALPHA_BASIC_USER && (env.ALPHA_BASIC_PASSWORD?.length ?? 0) >= 16 },
     { name: "public_origin", ready: validUrl(env.MONSTERA_PUBLIC_ORIGIN, ["https:"], true) },
     { name: "google_oidc", ready: !!env.GOOGLE_CLIENT_ID && !!env.GOOGLE_CLIENT_SECRET },
+    { name: "google_redirect_uri", ready: validRedirectUri(env.MONSTERA_PUBLIC_ORIGIN, env.MONSTERA_EXPECTED_GOOGLE_REDIRECT_URI) },
     { name: "signed_session", ready: Buffer.byteLength(env.MONSTERA_SESSION_SECRET ?? "", "utf8") >= 32 },
     { name: "staging_marker", ready: env.MONSTERA_STAGING_ONLY === "true" },
     { name: "declared_nonproduction_db", ready: validDatabaseUrl(env.DATABASE_URL, env.MONSTERA_EXPECTED_TEST_DB_NAME) },

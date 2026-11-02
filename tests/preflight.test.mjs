@@ -8,6 +8,7 @@ const template = {
   MONSTERA_PUBLIC_ORIGIN: "https://alpha.example.com",
   GOOGLE_CLIENT_ID: "fake-client-id",
   GOOGLE_CLIENT_SECRET: "fake-test-only-value",
+  MONSTERA_EXPECTED_GOOGLE_REDIRECT_URI: "https://alpha.example.com/api/auth/google/callback",
   MONSTERA_SESSION_SECRET: "long-mock-signing-secret-for-ci-tests-000",
   DATABASE_URL: "postgresql://mock:secret@ep-example-pooler.neon.tech/staging?sslmode=require",
   UPSTASH_REDIS_REST_URL: "https://example.upstash.io",
@@ -28,7 +29,7 @@ const template = {
 test("preflight: only reports field statuses, never secret values or live success", () => {
   const result = inspectIntegrationConfig(template);
   assert.equal(result.syntacticallyConfiguredForStagingReview, true);
-  assert.equal(result.checks.length, 15);
+  assert.equal(result.checks.length, 16);
   const serialized = JSON.stringify(result);
   assert.equal(serialized.includes(template.GOOGLE_CLIENT_SECRET), false);
   assert.equal(serialized.includes(template.DATABASE_URL), false);
@@ -73,4 +74,21 @@ test("preflight: production DB name mismatch, missing stage marker, stale prices
   }]) });
   assert.equal(stale.syntacticallyConfiguredForStagingReview, false);
   assert.ok(unapproved.advisory.includes("unverified"));
+});
+
+
+test("preflight: staging callback must exactly match public HTTPS origin", () => {
+  const valid = inspectIntegrationConfig(template);
+  assert.equal(valid.checks.find(check => check.name === "google_redirect_uri").ready, true);
+  for (const bad of [
+    "https://other.example.com/api/auth/google/callback",
+    "http://alpha.example.com/api/auth/google/callback",
+    "https://alpha.example.com/api/auth/google/callback?next=evil",
+    "https://alpha.example.com/api/auth/google/callback/",
+    "https://alpha.example.com/api/auth/google/callback#fragment",
+    "",
+  ]) {
+    const result = inspectIntegrationConfig({ ...template, MONSTERA_EXPECTED_GOOGLE_REDIRECT_URI: bad });
+    assert.equal(result.syntacticallyConfiguredForStagingReview, false, bad);
+  }
 });

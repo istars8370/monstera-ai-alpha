@@ -15,7 +15,7 @@ export function googleOAuthConfig(): GoogleOAuthConfig {
   let url: URL;
   try { url = new URL(publicOrigin); } catch { throw new Error("INVALID_PUBLIC_ORIGIN"); }
   const local = ["localhost", "127.0.0.1"].includes(url.hostname);
-  if ((url.protocol !== "https:" && !(url.protocol === "http:" && local)) ||
+  if ((url.protocol !== "https:" && !(url.protocol === "http:" && local && process.env.NODE_ENV !== "production")) ||
       url.pathname !== "/" || url.search || url.hash || url.username || url.password) {
     throw new Error("INVALID_PUBLIC_ORIGIN");
   }
