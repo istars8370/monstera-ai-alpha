@@ -4,7 +4,7 @@ export function calculateQuote(input: QuoteInput): QuoteResult {
   if (!input || typeof input !== "object") throw new RangeError("INVALID_QUOTE");
   const fields = ["paid_krw","cash_cost_krw","labor_minutes","labor_rate_krw","fee_krw","refund_krw","ai_cost_krw","revision_cost_krw"] as const;
   for (const key of fields) {
-    const value = input[key] ?? (key === "ai_cost_krw" || key === "revision_cost_krw" ? 0 : undefined);
+    const value = input[key] === undefined && (key === "ai_cost_krw" || key === "revision_cost_krw") ? 0 : input[key];
     if (!Number.isSafeInteger(value) || typeof value !== "number" || value < 0 || value > 50_000_000) throw new RangeError("INVALID_"+key.toUpperCase());
   }
   if (input.labor_minutes > 30_000 || input.labor_rate_krw > 1_000_000 || input.refund_krw > input.paid_krw) throw new RangeError("INVALID_QUOTE_LIMIT");
