@@ -5,8 +5,8 @@ import { getPool } from "@/db/pool";
 import { trustedOrigin } from "@/lib/request-origin";
 import {
   consumeWalletNonce, verifyWalletChallenge, verifyWalletSignature, walletSigningMessage,
+  SIWS_COOKIE, SIWS_COOKIE_OPTIONS,
 } from "@/lib/solana-wallet";
-import { SIWS_COOKIE, SIWS_COOKIE_OPTIONS } from "@/app/api/auth/wallet/nonce/route";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

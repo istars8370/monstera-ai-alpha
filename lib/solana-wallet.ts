@@ -2,6 +2,12 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypt
 import nacl from "tweetnacl";
 
 const BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+export const SIWS_COOKIE = "monstera_siws_nonce";
+export const SIWS_COOKIE_OPTIONS = {
+  httpOnly: true, sameSite: "lax" as const,
+  secure: process.env.NODE_ENV === "production",
+  path: "/api/auth/wallet", maxAge: 300,
+};
 const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const NONCE_TTL_MS = 5 * 60 * 1000;
 
