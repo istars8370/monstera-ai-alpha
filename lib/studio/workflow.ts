@@ -7,7 +7,7 @@ export interface Content { post: string; hashtags: string; imagePrompt: string; 
 export interface StudioRecord { id: string; userId: string; revision: number; state: StudioState; brief: Brief; content: Content; checks: Record<(typeof REVIEW_CHECKS)[number], boolean> | null; }
 export class StudioInputError extends Error { constructor(readonly status: number, message: string) { super(message); } }
 function bounded(value: unknown, min: number, max: number): value is string {
-  return typeof value === "string" && value.trim().length >= min && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
+  return typeof value === "string" && value.trim().length >= min && value.length <= max && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value);
 }
 export function validateBrief(value: unknown): Brief {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new StudioInputError(400, "브리프를 확인하세요.");
