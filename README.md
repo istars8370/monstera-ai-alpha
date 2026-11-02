@@ -19,8 +19,8 @@ GitHub Actions runs frozen install/typecheck/lint/test/build, real localhost HTT
 
 - Browser suite: `pnpm exec playwright install --only-shell chromium` then start Next locally and run `pnpm exec playwright test --config=playwright.config.mjs`. CI runs the complete setup automatically.
 - Offline integration setup check: `node scripts/preflight.mjs` prints statuses only; it does not reveal secrets or contact providers.
-- Release readiness and blockers: [MVP Release Gates v1.8](docs/MVP_RELEASE_GATES_v1.8.md).
-- Non-deployment operations checklist: [Operational Readiness Runbook](ALPHA_DEPLOY.md).
+- Release readiness and blockers: [Current release gates](docs/RELEASE_GATES.md).
+- Non-deployment operations checklist: [Staging and incident runbook](docs/RELEASE_GATES.md).
 
 ## Environment configuration
 
@@ -59,22 +59,22 @@ Even a zero-priced local model can incur upstream provider costs. Set operator-a
 - Review provider data processing, local IndexedDB plaintext privacy, account isolation and operational monitoring.
 - Request explicit approval for main merge, production DB changes, deployment, actual payments and public launch.
 
-See db/migrations and tests for generated SQL and automated test cases.
+See db/migrations and tests for generated SQL and automated test cases. Release-gate decisions are maintained only in [docs/RELEASE_GATES.md](docs/RELEASE_GATES.md).
 
-## v1.8 safety and staging
+## Cost and staging safeguards (historical implementation)
 
 - Cost estimates are USD-micro *predictions*, not verified provider charges. Reviewed upstream prices, a separate operator-confirmed provider hard budget, and Redis call/estimated-cost caps are now mandatory for alpha provider dispatch.
 - Actual paid credit charging is still disabled. Billing replay mismatch fails closed.
 - Local IndexedDB content is plaintext and visible to the browser profile. The UI offers an explicit confirmed purge of all device chat records.
-- Staging preflight is offline only. See docs/MVP_RELEASE_GATES_v1.8.md and ALPHA_DEPLOY.md.
+- Staging preflight is offline only. See docs/RELEASE_GATES.md and docs/RELEASE_GATES.md.
 
 
-## v1.9 staging/release status
+## Current staging/release status
 
 Current milestone: security and billing integrity fixes, disposable backup
 restore verification, and nonproduction provider-budget decision checklist.
 No live Google, Neon, Upstash or AI model usage; paid charging remains disabled.
 
-- [v1.9 staging and credit policy decisions](docs/STAGING_ACCEPTANCE_v1.9.md)
-- [v1.9 MVP Release Gate assessment](docs/MVP_RELEASE_GATES_v1.9.md)
-- [staging and incident runbook](ALPHA_DEPLOY.md)
+- [Staging and financial policy decisions](docs/RELEASE_GATES.md)
+- [Current release-gate assessment](docs/RELEASE_GATES.md)
+- [Staging and incident runbook](docs/RELEASE_GATES.md)
