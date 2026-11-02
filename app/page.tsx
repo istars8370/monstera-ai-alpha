@@ -2,9 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ChatSseParser } from "@/lib/client-sse";
+import { encodeBase58 } from "@/lib/client-base58";
 
 type Message = { role: "user" | "assistant"; content: string };
 type ModelChoice = { id: string; label: string; provider: string; context: number };
+type SolanaWallet = {
+  connect: () => Promise<{ publicKey: { toBase58: () => string } }>;
+  signMessage: (message: Uint8Array, display?: "utf8") => Promise<{ signature: Uint8Array }>;
+};
 const DB_NAME = "monstera-alpha-local";
 
 function openDb(): Promise<IDBDatabase> {
@@ -154,6 +159,65 @@ export default function HomePage() {
     const userId = userIdRef.current;
     if (userId) void saveChat(items, userId).catch(() => setNotice("로컬 기록 저장 실패"));
   };
+  async function connectSolanaWallet() {
+    if (busy) return;
+    const provider = (window as Window & { solana?: SolanaWallet }).solana;
+    if (!provider) {
+      setNotice("Solana 서명 기능을 지원하는 지갑이 없습니다. 지갑 확장 프로그램을 확인하세요.");
+      return;
+    }
+    try {
+      const response = await fetch("/api/auth/wallet/nonce", { cache: "no-store" });
+      if (!response.ok) throw new Error("SIWS_NOT_CONFIGURED");
+      const challenge: unknown = await response.json();
+      if (!challenge || typeof challenge !== "object") throw new Error("INVALID_NONCE");
+      const values = challenge as Record<string, unknown>;
+      if (typeof values.nonce !== "string" ||
+          typeof values.domain !== "string" || typeof values.issuedAt !== "string") {
+        throw new Error("INVALID_NONCE");
+      }
+      const connected = await provider.connect();
+      const walletAddress = connected.publicKey.toBase58();
+      const message = [
+        "Sign-In With Solana — MONSTERA AI",
+        "Domain: " + values.domain,
+        "Address: " + walletAddress,
+        "Nonce: " + values.nonce,
+        "Issued At: " + new Date(values.issuedAt).toISOString(),
+      ].join("\n");
+      // signMessage는 지갑 내부에서 서명한다. 개인키를 요청하거나 서버로 전달하지 않는다.
+      const { signature } = await provider.signMessage(new TextEncoder().encode(message), "utf8");
+      const verified = await fetch("/api/auth/wallet/verify", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletAddress, signature: encodeBase58(signature) }),
+      });
+      if (!verified.ok) {
+        const body: unknown = await verified.json().catch(() => null);
+        const code = body && typeof body === "object" && "code" in body &&
+          typeof body.code === "string" ? body.code : "SIWS_UNAVAILABLE";
+        throw new Error(code);
+      }
+      window.location.reload();
+    } catch (error) {
+      setNotice("지갑 인증 실패: " + (error instanceof Error ? error.message : "SIWS_UNAVAILABLE"));
+    }
+  }
+  async function grantWalletCredits() {
+    if (!signedIn || busy) return;
+    try {
+      const response = await fetch("/api/credits/grant", { method: "POST" });
+      const data: unknown = await response.json();
+      if (!response.ok || !data || typeof data !== "object" ||
+          !("granted" in data) || typeof data.granted !== "number") {
+        throw new Error(data && typeof data === "object" && "code" in data &&
+          typeof data.code === "string" ? data.code : "GRANT_UNAVAILABLE");
+      }
+      setNotice("일일 토큰 티어 크레딧 지급: " + data.granted);
+      window.location.reload();
+    } catch (error) {
+      setNotice("일일 지급 확인 실패: " + (error instanceof Error ? error.message : "GRANT_UNAVAILABLE"));
+    }
+  }
   async function logout() {
     if (busy) return;
     try {
@@ -294,6 +358,11 @@ export default function HomePage() {
               <button type="button" onClick={() => void logout()} disabled={busy} className="rounded-lg border px-3 py-2">로그아웃</button>
             </>
           )}
+          <button type="button" onClick={() => void connectSolanaWallet()} disabled={busy} className="rounded-lg border px-3 py-2">
+            {signedIn ? "Solana 지갑 연결" : "Solana 지갑 로그인"}
+          </button>
+          {signedIn && <button type="button" onClick={() => void grantWalletCredits()} disabled={busy}
+            className="rounded-lg border px-3 py-2">토큰 티어·일일 지급 확인</button>}
         </div>
         {signedIn && <p className="mt-2 text-sm text-slate-500">내부 크레딧 가용 잔액: {availableCredits ?? "조회 불가"} · 유료 정산 비활성화</p>}
       </header>
