@@ -40,8 +40,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     request.cookies.get(SIWS_COOKIE)?.value, process.env.MONSTERA_SESSION_SECRET ?? "",
   );
   if (!challenge) return respond(401, "INVALID_NONCE");
-  if (!verifyWalletSignature(input.walletAddress, input.signature,
-    walletSigningMessage(challenge, input.walletAddress))) return respond(401, "INVALID_SIGNATURE");
+  let message: string;
+  try { message = walletSigningMessage(challenge, input.walletAddress); }
+  catch { return respond(401, "INVALID_SIGNATURE"); }
+  if (!verifyWalletSignature(input.walletAddress, input.signature, message)) {
+    return respond(401, "INVALID_SIGNATURE");
+  }
   const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
   const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
   const namespace = process.env.MONSTERA_REDIS_NAMESPACE;
