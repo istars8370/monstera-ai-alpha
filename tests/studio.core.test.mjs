@@ -22,6 +22,10 @@ test("workflow has fail-closed review approvals and stale revision protection",(
  assert.throws(()=>applyAction(reviewed,"approve",2,{checks:{...checks,rights:false}}),{status:400});
  const approved=applyAction(reviewed,"approve",2,{checks});
  assert.match(exportApproved(approved),/수동 전달용/);
+ assert.deepEqual(Object.keys(approved.checks).sort(),Object.keys(checks).sort());
+ const withUntrustedExtra=applyAction(reviewed,"approve",2,{checks:{...checks,owner:"forged",rightsProof:"not-proven"}});
+ assert.deepEqual(withUntrustedExtra.checks,checks);
+ assert.throws(()=>applyAction(reviewed,"approve",2,{checks:[]}),{status:400});
  assert.throws(()=>applyAction(approved,"export",2),{status:409});
  const edited=applyAction(approved,"edit",3,{content:{...approved.content,post:"사람이 수정한 내용"}});
  assert.equal(edited.state,"DRAFT");
