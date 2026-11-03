@@ -64,6 +64,7 @@ test("submission requires real UUID idempotency key and remains fail-closed",asy
  assert.equal(prod.status,202);
  const replay=await submitRoute(request());
  assert.equal(replay.status,409);
+ await assert.rejects(submitMockGeneration(user,"creator",{...input,maxTokens:64}),{status:409});
  assert.equal(billingWallet(user).reserved>0,true);
  assert.equal(billingJob((await prod.json()).jobId).status,"queued");
 });
