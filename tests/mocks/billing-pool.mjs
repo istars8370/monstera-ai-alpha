@@ -1,10 +1,10 @@
 // Test-only transactional credit ledger simulator. Not a PostgreSQL replacement.
 // Disposable PostgreSQL CI separately validates row locks and SQL constraints.
-const state = { credits: new Map(), ledger: new Map(), nextId: 0, failOnce: "" };
+const state = { credits: new Map(), ledger: new Map(), jobs: new Map(), nextId: 0, failOnce: "" };
 const keyFor = (id, request) => id + ":" + request;
 
 export function resetBillingMock() {
-  state.credits.clear(); state.ledger.clear(); state.nextId = 0; state.failOnce = "";
+  state.credits.clear(); state.ledger.clear(); state.jobs.clear(); state.nextId = 0; state.failOnce = "";
 }
 export function seedBillingCredit(userId, balance, reserved = 0, wallets = {}) {
   state.credits.set(userId, {balance,reserved,
@@ -27,17 +27,20 @@ export function expireBillingLedger(userId, requestId) {
   const row = state.ledger.get(keyFor(userId, requestId));
   if (row) row.reserved_until = Date.now() - 10000;
 }
+export function billingJob(id) { const row = state.jobs.get(id); return row ? {...row} : null; }
 export function failNextBillingQuery(sqlFragment) { state.failOnce = sqlFragment; }
 function snapshot() {
   return {
     credits: new Map([...state.credits].map(([id, row]) => [id, { ...row }])),
     ledger: new Map([...state.ledger].map(([id, row]) => [id, { ...row }])),
+    jobs: new Map([...state.jobs].map(([id, row]) => [id, { ...row }])),
     nextId: state.nextId,
   };
 }
 function restore(saved) {
   state.credits = saved.credits;
   state.ledger = saved.ledger;
+  state.jobs = saved.jobs;
   state.nextId = saved.nextId;
 }
 function response(rows = [], rowCount = rows.length) { return { rows, rowCount }; }
@@ -46,6 +49,52 @@ async function query(sqlInput, params = []) {
   if (state.failOnce && sql.includes(state.failOnce)) {
     state.failOnce = "";
     throw new Error("MOCK_DATABASE_WRITE_FAILED");
+  }
+  if (sql.includes("INSERT INTO studio_jobs(user_id,ledger_id,modality,model,status)")) {
+    const [userId,ledgerId,modality,model] = params;
+    const id = "bbbbbbbb-bbbb-4bbb-8bbb-" + String(++state.nextId).padStart(12,"0");
+    const row = {id,user_id:userId,ledger_id:ledgerId,modality,model,status:"queued",
+      provider_job_id:null,created_at:new Date(),finished_at:null};
+    state.jobs.set(id,row);
+    return response([{...row}]);
+  }
+  if (sql.includes("FROM usage_ledger l JOIN studio_jobs j") &&
+      sql.includes("FOR UPDATE OF l,j")) {
+    const [jobId,userId,requestId] = params;
+    const job = state.jobs.get(jobId);
+    const ledger = [...state.ledger.values()].find(x=>x.id===job?.ledger_id);
+    if (!job || !ledger || job.user_id!==userId || ledger.user_id!==userId ||
+        ledger.idem_key!==requestId) return response();
+    return response([{...job,ledger_status:ledger.status}]);
+  }
+  if (sql.includes("FROM usage_ledger l INNER JOIN studio_jobs j")) {
+    const [maxAgeSeconds,limit] = params;
+    const expired = [...state.jobs.values()].flatMap(job=>{
+      const ledger=[...state.ledger.values()].find(x=>x.id===job.ledger_id);
+      if (!ledger || ledger.status!=="held" || !["queued","running"].includes(job.status) ||
+          ledger.reserved_until>=Date.now() ||
+          job.created_at.getTime()>=Date.now()-maxAgeSeconds*1000) return [];
+      return [{job_id:job.id,ledger_id:ledger.id,user_id:ledger.user_id,
+        modality:ledger.modality,reserved_amount:ledger.reserved_amount}];
+    }).slice(0,limit);
+    return response(expired);
+  }
+  if (sql.includes("FROM studio_jobs WHERE id=$1 AND user_id=$2")) {
+    const row=state.jobs.get(params[0]);
+    return response(row?.user_id===params[1]?[{...row}]:[]);
+  }
+  if (sql.includes("UPDATE studio_jobs SET status=$3")) {
+    const [jobId,userId,status]=params, row=state.jobs.get(jobId);
+    if(!row || row.user_id!==userId || !["queued","running"].includes(row.status))
+      return response();
+    row.status=status; row.finished_at=new Date();
+    return response([{...row}]);
+  }
+  if (sql.includes("UPDATE studio_jobs SET status='reclaimed'")) {
+    const row=state.jobs.get(params[0]);
+    if(!row || !["queued","running"].includes(row.status)) return response();
+    row.status="reclaimed";row.finished_at=new Date();
+    return response([],1);
   }
   if (sql.includes("INSERT INTO usage_ledger") && sql.includes("ON CONFLICT")) {
     const [userId, requestId, model, reservedAmount, priceSnapshot, modality = "text", ttlSeconds = 120] = params;
@@ -128,7 +177,8 @@ async function query(sqlInput, params = []) {
   }
   if (sql.includes("WHERE status = 'held' AND reserved_until < now()")) {
     return response([...state.ledger.values()]
-      .filter(row => row.status === "held" && row.reserved_until < Date.now())
+      .filter(row => row.status === "held" && row.reserved_until < Date.now() &&
+        ![...state.jobs.values()].some(job=>job.ledger_id===row.id && ["queued","running"].includes(job.status)))
       .slice(0, params[0]));
   }
   if (sql.includes("UPDATE credits SET reserved = reserved - $1")) {
@@ -148,6 +198,7 @@ async function query(sqlInput, params = []) {
 }
 export function getPool() {
   return {
+    query,
     async connect() {
       let transaction;
       return {
