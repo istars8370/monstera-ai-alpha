@@ -85,6 +85,9 @@ jobs:
           RESERVED=$($PSQL -tAc "SELECT reserved FROM credits WHERE user_id=(SELECT id FROM users WHERE email='concurrent-test@example.invalid');")
           test "$RESERVED" = '80'
 
+      - name: Exercise Studio finalize/reclaim lock race on disposable PostgreSQL
+        run: bash tests/studio-job-concurrency.sh
+
       - name: Validate disposable PostgreSQL backup and restore
         run: |
           set -euo pipefail
