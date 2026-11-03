@@ -62,6 +62,49 @@ class ProposalValidatorTests(unittest.TestCase):
         self.assertIn("diff --git", (self.root / ".autodev.patch").read_text())
         self.assertTrue((self.root / ".autodev-body.md").exists())
 
+    def test_offline_draft_staging_without_remote_or_credentials(self) -> None:
+        """Simulate validate -> stage -> commit; no network and no PR API."""
+        result = self.check(payload(new_file_patch()))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        subprocess.run(
+            ["git", "apply", "--index", "--", ".autodev.patch"],
+            cwd=self.root, check=True
+        )
+        staged = subprocess.check_output(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=self.root, text=True
+        ).strip()
+        self.assertEqual(staged, GOOD_PATH)
+        subprocess.run(
+            ["git", "switch", "-q", "-c", "autodev/pilot-offline"],
+            cwd=self.root, check=True
+        )
+        subprocess.run(
+            ["git", "-c", "user.name=Offline QA",
+             "-c", "user.email=qa@example.invalid",
+             "commit", "-qm", "test: simulated draft payload"],
+            cwd=self.root, check=True
+        )
+        self.assertTrue((self.root / GOOD_PATH).is_file())
+        remotes = subprocess.check_output(
+            ["git", "remote"], cwd=self.root, text=True
+        ).strip()
+        self.assertEqual(remotes, "")
+        self.assertEqual(
+            subprocess.check_output(
+                ["git", "branch", "--show-current"], cwd=self.root, text=True
+            ).strip(), "autodev/pilot-offline"
+        )
+
+    def test_rejects_invalid_json(self) -> None:
+        result = self.check("{invalid")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.output.exists())
+
+    def test_rejects_patch_with_excessive_lines(self) -> None:
+        result = self.check(payload(new_file_patch() + " " * 15001))
+        self.assertNotEqual(result.returncode, 0)
+
     def test_no_change_is_safe(self) -> None:
         result = self.check(payload(""))
         self.assertEqual(result.returncode, 0, result.stderr)
