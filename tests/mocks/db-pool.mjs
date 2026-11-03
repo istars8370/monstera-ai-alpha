@@ -1,14 +1,14 @@
 // In-memory query adapter for route-handler tests. Never imported in Next runtime.
 // Real SQL uniqueness/rollback is separately tested against disposable PostgreSQL.
-const state = { users: new Map(), models: new Map(), credits: new Map(), drafts: new Map(), orders: new Map(), queries: [], sequence: 0 };
+const state = { users: new Map(), models: new Map(), credits: new Map(), drafts: new Map(), orders: new Map(), grants: new Map(), queries: [], sequence: 0 };
 
 export function resetTestDb() {
-  state.users.clear(); state.models.clear(); state.credits.clear(); state.drafts.clear(); state.orders.clear(); state.queries.length = 0;
+  state.users.clear(); state.models.clear(); state.credits.clear(); state.drafts.clear(); state.orders.clear(); state.grants.clear(); state.queries.length = 0;
   state.sequence = 0;
 }
 export function addUser(row) { state.users.set(row.id, { ...row }); }
 export function addModel(row) { state.models.set(row.id, { ...row }); }
-export function addCredits(userId, balance, reserved = 0) { state.credits.set(userId, { balance, reserved }); }
+export function addCredits(userId, balance, reserved = 0) { state.credits.set(userId, { balance, reserved, image_balance:0, video_balance:0 }); }
 export function queries() { return [...state.queries]; }
 export function findUserByGoogleSub(sub) { return [...state.users.values()].find(row => row.google_sub === sub); }
 
@@ -43,6 +43,20 @@ async function query(sqlInput, parameters = []) {
     const user = state.users.get(parameters[0]);
     if (user) user.session_epoch++;
     return { rows: [], rowCount: user ? 1 : 0 };
+  }
+  if (sql.includes("INSERT INTO wallet_grants (user_id,day,text_granted")) {
+    const [userId,day,text,image,video]=parameters;
+    const key=userId+":"+day;
+    if(state.grants.has(key))return {rows:[],rowCount:0};
+    state.grants.set(key,{userId,day,text,image,video});
+    return {rows:[{user_id:userId}],rowCount:1};
+  }
+  if (sql.includes("UPDATE credits SET balance=balance+$1,image_balance=image_balance+$2")) {
+    const [text,image,video,userId]=parameters;
+    const row=state.credits.get(userId);
+    if(!row)return {rows:[],rowCount:0};
+    row.balance+=text;row.image_balance+=image;row.video_balance+=video;
+    return {rows:[],rowCount:1};
   }
   if (sql.includes("INSERT INTO studio_orders (user_id,service,price_krw")) {
     const [userId,service,price,paid,cash,minutes,rate,labor,fee,revisions,refund,contribution,
@@ -137,6 +151,7 @@ const pool = {
           snapshot = {
             users: new Map([...state.users].map(([id, user]) => [id, { ...user }])),
             credits: new Map([...state.credits].map(([id, credit]) => [id, { ...credit }])),
+            grants: new Map([...state.grants].map(([key, grant]) => [key, { ...grant }])),
             sequence: state.sequence,
           };
           return { rows: [], rowCount: null };
@@ -146,6 +161,7 @@ const pool = {
           if (snapshot) {
             state.users = snapshot.users;
             state.credits = snapshot.credits;
+            state.grants = snapshot.grants;
             state.sequence = snapshot.sequence;
           }
           snapshot = undefined;
