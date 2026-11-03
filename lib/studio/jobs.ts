@@ -1,5 +1,5 @@
 import { getPool } from "@/db/pool";
-import { holdCredits, settleCredits, type CreditModality, type HoldInput } from "@/lib/billing";
+import { holdCreditsInTransaction, settleCreditsInTransaction, type CreditModality, type HoldInput } from "@/lib/billing";
 import { StudioInputError } from "@/lib/studio/workflow";
 
 const wallets = {
@@ -24,50 +24,69 @@ export async function getStudioJob(userId:string,id:string):Promise<StudioJob> {
   return result.rows[0];
 }
 
-/** Internal admission only. Never expose an unstarted queued job as a successful generation. */
-export async function reserveQueuedJob(input:HoldInput & {modality:CreditModality}):Promise<StudioJob> {
-  const hold=await holdCredits(input);
-  if(hold.status==="insufficient")throw new StudioInputError(402,"크레딧이 부족합니다.");
-  if(hold.status!=="held")throw new StudioInputError(409,"중복 요청입니다.");
+/** Reservation and job insertion are an indivisible DB operation. No compensating
+ * settlement or catch-up timer is required if insertion fails or the process dies. */
+export async function reserveQueuedJob(input: HoldInput & {modality: CreditModality}): Promise<StudioJob> {
+  const client = await getPool().connect();
   try {
-    const result=await getPool().query<StudioJob>(
+    await client.query("BEGIN");
+    const hold = await holdCreditsInTransaction(client, input);
+    if (hold.status === "insufficient") throw new StudioInputError(402, "크레딧이 부족합니다.");
+    if (hold.status !== "held") throw new StudioInputError(409, "중복 요청입니다.");
+    const result = await client.query<StudioJob>(
       `INSERT INTO studio_jobs(user_id,ledger_id,modality,model,status)
        VALUES ($1,$2,$3,$4,'queued')
        RETURNING id,user_id,ledger_id,modality,model,status,provider_job_id,created_at,finished_at`,
       [input.userId,hold.ledgerId,input.modality,input.model],
     );
-    if(!result.rows[0])throw new Error("STUDIO_JOB_INSERT_FAILED");
+    if (result.rowCount !== 1 || !result.rows[0]) throw new Error("STUDIO_JOB_INSERT_FAILED");
+    await client.query("COMMIT");
     return result.rows[0];
   } catch(error) {
-    // If the process dies before this compensation, generic ledger expiry reclaims the orphan hold.
-    await settleCredits(input.userId,input.requestId,0).catch(()=>undefined);
+    await client.query("ROLLBACK").catch(()=>undefined);
     throw error;
-  }
+  } finally { client.release(); }
 }
 
-/** Only trusted provider completion paths may invoke this, never client-supplied charges. */
-export async function finalizeStudioJob(userId:string,jobId:string,requestId:string,
-  charged:number,succeeded:boolean):Promise<StudioJob> {
-  const current=await getStudioJob(userId,jobId);
-  if(!["queued","running"].includes(current.status)) {
-    throw new StudioInputError(409,"이미 종료된 작업입니다.");
-  }
-  if(!succeeded && charged!==0)throw new StudioInputError(400,"실패 작업은 0으로 정산합니다.");
-  const ledger=await getPool().query<{id:string}>(
-    "SELECT id FROM usage_ledger WHERE id=$1 AND user_id=$2 AND idem_key=$3 LIMIT 1",
-    [current.ledger_id,userId,requestId],
-  );
-  if(ledger.rowCount!==1)throw new StudioInputError(409,"작업 예약 정보가 일치하지 않습니다.");
-  const settlement=await settleCredits(userId,requestId,charged);
-  if(settlement.status!=="settled")throw new StudioInputError(409,"회수됐거나 없는 예약입니다.");
-  const result=await getPool().query<StudioJob>(
-    `UPDATE studio_jobs SET status=$3,finished_at=now()
-     WHERE id=$1 AND user_id=$2 AND status IN ('queued','running',$3)
-     RETURNING id,user_id,ledger_id,modality,model,status,provider_job_id,created_at,finished_at`,
-    [jobId,userId,succeeded?"succeeded":"failed"],
-  );
-  if(!result.rows[0])throw new StudioInputError(409,"작업 상태가 변경됐습니다.");
-  return result.rows[0];
+/** Trusted worker completion only. Lock ledger and job in the same transaction
+ * as the credit charge. Recovery uses the same row locks, preventing double spend
+ * even when a worker and a reclaimer complete at the exact same moment. */
+export async function finalizeStudioJob(
+  userId: string, jobId: string, requestId: string, charged: number, succeeded: boolean,
+): Promise<StudioJob> {
+  if (!UUID.test(jobId)) throw new StudioInputError(404,"작업을 찾을 수 없습니다.");
+  if (!succeeded && charged !== 0) throw new StudioInputError(400, "실패 작업은 0으로 정산합니다.");
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const selected = await client.query<StudioJob & {ledger_status: string}>(
+      `SELECT j.id,j.user_id,j.ledger_id,j.modality,j.model,j.status,j.provider_job_id,
+        j.created_at,j.finished_at,l.status AS ledger_status
+       FROM usage_ledger l JOIN studio_jobs j ON j.ledger_id=l.id
+       WHERE j.id=$1 AND j.user_id=$2 AND l.user_id=$2 AND l.idem_key=$3
+       FOR UPDATE OF l,j`,
+      [jobId,userId,requestId],
+    );
+    const current = selected.rows[0];
+    if (!current) throw new StudioInputError(409,"작업 예약 정보가 일치하지 않습니다.");
+    if (!["queued","running"].includes(current.status) || current.ledger_status !== "held") {
+      throw new StudioInputError(409,"이미 종료된 작업입니다.");
+    }
+    const settlement = await settleCreditsInTransaction(client,userId,requestId,charged);
+    if (settlement.status !== "settled") throw new Error("JOB_SETTLEMENT_INVARIANT_BROKEN");
+    const result = await client.query<StudioJob>(
+      `UPDATE studio_jobs SET status=$3,finished_at=now()
+       WHERE id=$1 AND user_id=$2 AND status IN ('queued','running')
+       RETURNING id,user_id,ledger_id,modality,model,status,provider_job_id,created_at,finished_at`,
+      [jobId,userId,succeeded?"succeeded":"failed"],
+    );
+    if (result.rowCount !== 1 || !result.rows[0]) throw new Error("JOB_STATE_INVARIANT_BROKEN");
+    await client.query("COMMIT");
+    return result.rows[0];
+  } catch(error) {
+    await client.query("ROLLBACK").catch(()=>undefined);
+    throw error;
+  } finally { client.release(); }
 }
 
 /** Ledger and job rows are reclaimed atomically with SKIP LOCKED; never based on stream abort. */
