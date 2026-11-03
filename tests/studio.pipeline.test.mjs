@@ -48,6 +48,10 @@ function request(body=input,extraHeaders={}){
   body:JSON.stringify(body),
  });
 }
+test("worker rejects any injected adapter that is not the offline StudioMockProvider",async()=>{
+ await assert.rejects(processNextMockJob({chatStream:async function*(){throw new Error("would call network");},
+  listModels:async()=>[],healthCheck:async()=>({healthy:true})}),/ONLY_OFFLINE_MOCK_ADAPTER_ALLOWED/);
+});
 test("mock gate never enables on production or non-local DB",()=>{
  assert.equal(mockStudioEnabled({NODE_ENV:"production",DATABASE_URL:process.env.DATABASE_URL,
   MONSTERA_STUDIO_MOCK_ENABLED:"true"}),false);
