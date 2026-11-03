@@ -1,6 +1,6 @@
-import { boolean, check, index, integer, jsonb, pgTable, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+import { boolean, check, date, index, integer, jsonb, pgTable, primaryKey, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import { users } from "@/db/schema";
+import { usageLedger, users } from "@/db/schema";
 
 // Owner-scoped drafts are not legal attestations or immutable evidence.
 export const studioDrafts = pgTable("studio_drafts", {
@@ -52,4 +52,35 @@ export const studioOrders = pgTable("studio_orders", {
   check("studio_orders_minutes_revisions_nonnegative",sql`${table.laborMinutes} >= 0 AND ${table.revisions} >= 0`),
   check("studio_orders_refund_within_paid",sql`${table.refundKrw} <= ${table.paidKrw}`),
   check("studio_orders_paid_within_price",sql`${table.paidKrw} <= ${table.priceKrw}`),
+]);
+
+/** Queue state is durable; request-stream cancellation never settles provider work. */
+export const studioJobs = pgTable("studio_jobs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, {onDelete:"cascade"}),
+  ledgerId: uuid("ledger_id").notNull().references(() => usageLedger.id),
+  modality: varchar("modality", {length:16}).notNull(),
+  model: varchar("model", {length:512}).notNull(),
+  status: varchar("status", {length:16}).notNull().default("queued"),
+  providerJobId: varchar("provider_job_id", {length:512}),
+  createdAt: timestamp("created_at", {withTimezone:true}).notNull().defaultNow(),
+  finishedAt: timestamp("finished_at", {withTimezone:true}),
+}, (table) => [
+  index("studio_jobs_status_created_idx").on(table.status,table.createdAt),
+  index("studio_jobs_owner_created_idx").on(table.userId,table.createdAt),
+  check("studio_jobs_modality_allowed",sql`${table.modality} IN ('text','image','video','audio')`),
+  check("studio_jobs_status_allowed",sql`${table.status} IN ('queued','running','succeeded','failed','reclaimed')`),
+]);
+
+/** UTC daily grants are unique per user and calendar day. */
+export const walletGrants = pgTable("wallet_grants", {
+  userId: uuid("user_id").notNull().references(() => users.id, {onDelete:"cascade"}),
+  day: date("day", {mode:"string"}).notNull(),
+  textGranted: integer("text_granted").notNull().default(0),
+  imageGranted: integer("image_granted").notNull().default(0),
+  videoGranted: integer("video_granted").notNull().default(0),
+  createdAt: timestamp("created_at", {withTimezone:true}).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({columns:[table.userId,table.day]}),
+  check("wallet_grants_nonnegative",sql`${table.textGranted} >= 0 AND ${table.imageGranted} >= 0 AND ${table.videoGranted} >= 0`),
 ]);
