@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MONSTERA Autodev Pilot Proposal",
+  "type": "object",
+  "properties": {
+    "summary": {
+      "type": "string"
+    },
+    "patch": {
+      "type": "string"
+    },
+    "validation_plan": {
+      "type": "string"
+    },
+    "risks": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "summary",
+    "patch",
+    "validation_plan",
+    "risks"
+  ],
+  "additionalProperties": false
+}
