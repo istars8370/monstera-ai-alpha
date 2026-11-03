@@ -123,6 +123,17 @@ test("expired lease is recovered and old token cannot settle",async()=>{
  }),{status:409});
  assert.equal((await runMockWorkerTick()).result.status,"succeeded");
 });
+test("legacy completion cannot bypass active mock lease fencing",async()=>{
+ const submitted=await submitMockGeneration(user,"creator",input);
+ const job=await claimNextMockJob("dddddddd-dddd-4ddd-8ddd-dddddddddddd");
+ assert.equal(job.id,submitted.job.id);
+ await assert.rejects(finalizeStudioJob(user,job.id,requestId,1,true),{status:409});
+ assert.equal(billingLedger(user,requestId).status,"held");
+ assert.equal(billingWallet(user).reserved>0,true);
+ expireBillingMockJobLease(job.id);
+ assert.equal((await recoverExpiredMockLeases()).requeued,1);
+ assert.equal((await processNextMockJob()).status,"succeeded");
+});
 test("usage cost is bounded by the reserved amount and max output tokens",()=>{
  const policy={inputCreditsPerMillionTokens:1000000,outputCreditsPerMillionTokens:2000000};
  assert.throws(()=>studioTextActualCredits(policy,{inputTokens:100,outputTokens:300},
