@@ -88,6 +88,9 @@ jobs:
       - name: Exercise Studio finalize/reclaim lock race on disposable PostgreSQL
         run: bash tests/studio-job-concurrency.sh
 
+      - name: Verify mock worker claims and expired leases on disposable PostgreSQL
+        run: bash tests/studio-worker-lease-race.sh
+
       - name: Validate disposable PostgreSQL backup and restore
         run: |
           set -euo pipefail
