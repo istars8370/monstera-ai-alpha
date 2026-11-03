@@ -3,7 +3,7 @@ DO $$
 DECLARE n integer;
 BEGIN
   SELECT COUNT(*) INTO n FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE';
-  IF n <> 5 THEN RAISE EXCEPTION 'Expected exactly five application tables, got %', n; END IF;
+  IF n <> 9 THEN RAISE EXCEPTION 'Expected exactly nine application tables, got %', n; END IF;
 END $$;
 
 INSERT INTO users(email, email_verified_at) VALUES ('ledger-test@example.invalid', now());
