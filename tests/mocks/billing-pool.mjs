@@ -29,6 +29,7 @@ export function expireBillingLedger(userId, requestId) {
 }
 export function seedBillingMockUser(userId,tier="free") {state.users.set(userId,{id:userId,tier});}
 export function billingJob(id) { const row = state.jobs.get(id); return row ? {...row} : null; }
+export function expireBillingMockJobLease(id) { const row=state.jobs.get(id); if(row)row.lease_until=new Date(Date.now()-60000); }
 export function failNextBillingQuery(sqlFragment) { state.failOnce = sqlFragment; }
 function snapshot() {
   return {
