@@ -25,7 +25,7 @@ test("OpenAI adapter sends only mocked request, reuses bounded SSE parser",async
    assert.equal(body.model,"mock-model-id");
    assert.equal(body.max_tokens,128);
    assert.equal(body.stream_options.include_usage,true);
-   return new Response('data: {"choices":[{"delta":{"content":"한글"}}]}\\n\\ndata: {"usage":{"prompt_tokens":7,"completion_tokens":2}}\\n\\ndata: [DONE]\\n\\n',
+   return new Response('data: {"choices":[{"delta":{"content":"한글"}}]}\n\ndata: {"usage":{"prompt_tokens":7,"completion_tokens":2}}\n\ndata: [DONE]\n\n',
      {status:200,headers:{"content-type":"text/event-stream"}});
  };
  try {
@@ -42,6 +42,6 @@ test("OpenAI adapter sends only mocked request, reuses bounded SSE parser",async
  }
 });
 test("OpenAI adapter rejects truncated provider streams",async()=>{
- const adapter=new OpenAIAdapter("mock-not-real",async()=>new Response('data: {"choices":[{"delta":{"content":"partial"}}]}\\n\\n',{status:200}));
+ const adapter=new OpenAIAdapter("mock-not-real",async()=>new Response('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n',{status:200}));
  await assert.rejects(async()=>{for await(const _ of adapter.chatStream({model:"mock",messages:[]})){}},/UPSTREAM_TRUNCATED_SSE/);
 });
