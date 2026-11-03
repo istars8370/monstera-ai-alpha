@@ -62,9 +62,9 @@ jobs:
           if [ -n "$(git status --porcelain -- db/migrations)" ]; then
             # Export only generated schema artifacts, never credentials or application data.
             git status --porcelain -- db/migrations | cut -c4- | while IFS= read -r file; do
-              printf 'STUDIO_GENERATED_FILE:%s\\n' "$file"
+              printf 'STUDIO_GENERATED_FILE:%s\n' "$file"
               base64 -w0 "$file"
-              printf '\\nSTUDIO_GENERATED_END\\n'
+              printf '\nSTUDIO_GENERATED_END\n'
             done
             exit 1
           fi
