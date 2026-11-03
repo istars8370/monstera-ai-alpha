@@ -43,6 +43,7 @@ export async function processNextMockJob(
   const job=await claimNextMockJob(randomUUID());
   if(!job)return null;
   let content="",usage:{inputTokens:number;outputTokens:number}|null=null,done=false;
+  let completed:{charged:number;text:string;usage:{inputTokens:number;outputTokens:number}}|null=null;
   try{
     const price=readStoredPrice(job);
     if(job.tier!=="free"&&job.tier!=="creator"&&job.tier!=="studio")throw new Error("MOCK_USER_TIER_INVALID");
@@ -75,10 +76,7 @@ export async function processNextMockJob(
       reserved:job.reserved_amount,
     });
     const text="[MOCK · 운영 납품·게시 금지]\n"+content;
-    await finalizeStudioJob(job.user_id,job.id,job.request_id,charged,true,{
-      leaseToken:job.lease_token,resultText:text,usage:trusted,
-    });
-    return {jobId:job.id,status:"succeeded",chargedCredits:charged,mockOnly:true};
+    completed={charged,text,usage:trusted};
   }catch(error){
     // Only deterministic mock provider/validation failures are safely refundable at zero.
     // No live provider task is ever dispatched by this module.
@@ -87,6 +85,13 @@ export async function processNextMockJob(
     const status=await retryOrFailMockJob(job,code);
     return {jobId:job.id,status,chargedCredits:0,mockOnly:true};
   }
+  // This commit is deliberately OUTSIDE the provider error handler. A database
+  // failure must leave its lease for recovery, not silently refund a consumed job.
+  if(!completed)throw new Error("MOCK_RESULT_MISSING");
+  await finalizeStudioJob(job.user_id,job.id,job.request_id,completed.charged,true,{
+    leaseToken:job.lease_token,resultText:completed.text,usage:completed.usage,
+  });
+  return {jobId:job.id,status:"succeeded",chargedCredits:completed.charged,mockOnly:true};
 }
 
 export async function runMockWorkerTick(adapter?:ProviderAdapter):Promise<{
