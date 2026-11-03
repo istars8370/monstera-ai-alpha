@@ -36,17 +36,17 @@ export function assertCompatibleHold(
   }
 }
 
+export type BillingClient = Awaited<ReturnType<ReturnType<typeof getPool>["connect"]>>;
+
 // 모든 예약은 한 트랜잭션에서 멱등 게이트를 먼저 통과한다.
-export async function holdCredits(input: HoldInput): Promise<HoldResult> {
+export async function holdCreditsInTransaction(client: BillingClient, input: HoldInput): Promise<HoldResult> {
   const modality=input.modality ?? "text";
   if(!isModality(modality) || (input.ttlSeconds!==undefined && input.ttlSeconds!==TTL_SECONDS[modality])) throw new Error("INVALID_HOLD_TTL");
   const ttlSeconds=TTL_SECONDS[modality];
   const wallet=wallets[modality];
   if (!validAmount(input.reserved) || input.reserved === 0 || input.requestId.length > 128 || !input.requestId ||
       !input.model || input.model.length > 512 || !input.priceSnapshot || input.priceSnapshot.length > 4096) throw new Error("INVALID_HOLD");
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
+  // The caller owns BEGIN/COMMIT; do not acquire a second connection.
     const inserted = await client.query<{ id: string }>(
       `INSERT INTO usage_ledger (user_id, idem_key, type, status, model, reserved_amount, reserved_until, price_snapshot, modality)
        VALUES ($1, $2, 'usage', 'held', $3, $4, now() + ($7::int * interval '1 second'), $5, $6)
@@ -63,7 +63,7 @@ export async function holdCredits(input: HoldInput): Promise<HoldResult> {
       const item = existing.rows[0];
       if (!item) throw new Error("LEDGER_CONFLICT_RETRY");
       assertCompatibleHold(item, input);
-      await client.query("COMMIT");
+      
       if (item.status === "settled") return { status: "settled", charged: item.settled_amount };
       return { status: item.status === "reclaimed" ? "reclaimed" : "duplicate_held" };
     }
@@ -75,11 +75,21 @@ export async function holdCredits(input: HoldInput): Promise<HoldResult> {
     if (!reserved.rowCount) {
       const removed = await client.query("DELETE FROM usage_ledger WHERE id = $1", [inserted.rows[0].id]);
       if (removed.rowCount !== 1) throw new Error("LEDGER_INVARIANT_BROKEN");
-      await client.query("COMMIT");
+      
       return { status: "insufficient" };
     }
-    await client.query("COMMIT");
+    
     return { status: "held", ledgerId: inserted.rows[0].id };
+}
+
+
+export async function holdCredits(input: HoldInput): Promise<HoldResult> {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const result = await holdCreditsInTransaction(client, input);
+    await client.query("COMMIT");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
@@ -89,23 +99,21 @@ export async function holdCredits(input: HoldInput): Promise<HoldResult> {
 export type SettleResult = { status: "settled"; charged: number } | { status: "reclaimed" | "missing" };
 
 // 취소와 에러에도 수신된 토큰만큼 정산한다. 정산은 중복 실행해도 1회만 반영된다.
-export async function settleCredits(userId: string, requestId: string, charged: number): Promise<SettleResult> {
+export async function settleCreditsInTransaction(client: BillingClient, userId: string, requestId: string, charged: number): Promise<SettleResult> {
   if (!validAmount(charged)) throw new Error("INVALID_SETTLEMENT");
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
+  // The caller owns BEGIN/COMMIT; do not acquire a second connection.
     const result = await client.query<{ id: string; status: string; reserved_amount: number; settled_amount: number; modality?: string }>(
       "SELECT id, status, reserved_amount, settled_amount, modality FROM usage_ledger WHERE user_id = $1 AND idem_key = $2 FOR UPDATE",
       [userId, requestId],
     );
     const item = result.rows[0];
-    if (!item) { await client.query("COMMIT"); return { status: "missing" }; }
+    if (!item) {  return { status: "missing" }; }
     if (item.status === "settled") {
       if (item.settled_amount !== charged) throw new Error("SETTLEMENT_REPLAY_MISMATCH");
-      await client.query("COMMIT");
+      
       return { status: "settled", charged: item.settled_amount };
     }
-    if (item.status !== "held") { await client.query("COMMIT"); return { status: "reclaimed" }; }
+    if (item.status !== "held") {  return { status: "reclaimed" }; }
     if (charged > item.reserved_amount) throw new Error("SETTLEMENT_EXCEEDS_RESERVATION");
     const modality=item.modality ?? "text";
     if (!isModality(modality)) throw new Error("INVALID_LEDGER_MODALITY");
@@ -121,8 +129,18 @@ export async function settleCredits(userId: string, requestId: string, charged: 
       [charged, item.id],
     );
     if (ledgerUpdated.rowCount !== 1) throw new Error("LEDGER_INVARIANT_BROKEN");
-    await client.query("COMMIT");
+    
     return { status: "settled", charged };
+}
+
+
+export async function settleCredits(userId: string, requestId: string, charged: number): Promise<SettleResult> {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const result = await settleCreditsInTransaction(client, userId, requestId, charged);
+    await client.query("COMMIT");
+    return result;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
