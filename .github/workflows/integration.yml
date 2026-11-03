@@ -27,6 +27,18 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
+      - run: git diff --check
+      - name: Verify mock worker CLI refuses all production invocations
+        env:
+          NODE_ENV: production
+          MONSTERA_STUDIO_MOCK_ENABLED: 'true'
+          DATABASE_URL: postgresql://disposable:synthetic@127.0.0.1:5432/mock-only
+        run: |
+          if pnpm studio:mock-worker > /tmp/studio-gate.log 2>&1; then
+            echo "Production mock worker must not run" >&2
+            exit 1
+          fi
+          grep -q 'Mock 생성은' /tmp/studio-gate.log
 
   database-smoke:
     runs-on: ubuntu-latest
