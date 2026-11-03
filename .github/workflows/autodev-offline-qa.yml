@@ -1,0 +1,26 @@
+name: Autodev Pilot Offline QA
+
+on:
+  pull_request:
+    paths:
+      - '.github/autodev/**'
+      - '.github/workflows/monstera-autodev-pilot.yml'
+      - '.github/workflows/autodev-offline-qa.yml'
+      - 'tools/autodev/**'
+      - 'docs/autodev/**'
+
+permissions:
+  contents: read
+
+jobs:
+  patch-validator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify Python syntax and seven offline security cases
+        run: |
+          python3 -m py_compile tools/autodev/validate_proposal.py tools/autodev/test_validate_proposal.py
+          python3 -m unittest discover -s tools/autodev -p 'test_*.py' -v
