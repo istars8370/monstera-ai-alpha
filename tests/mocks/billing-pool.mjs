@@ -6,8 +6,9 @@ const keyFor = (id, request) => id + ":" + request;
 export function resetBillingMock() {
   state.credits.clear(); state.ledger.clear(); state.nextId = 0; state.failOnce = "";
 }
-export function seedBillingCredit(userId, balance, reserved = 0) {
-  state.credits.set(userId, { balance, reserved });
+export function seedBillingCredit(userId, balance, reserved = 0, wallets = {}) {
+  state.credits.set(userId, {balance,reserved,
+    image_balance:0,image_reserved:0,video_balance:0,video_reserved:0,...wallets});
 }
 export function billingCredit(userId) {
   const row = state.credits.get(userId);
@@ -42,20 +43,50 @@ async function query(sqlInput, params = []) {
     throw new Error("MOCK_DATABASE_WRITE_FAILED");
   }
   if (sql.includes("INSERT INTO usage_ledger") && sql.includes("ON CONFLICT")) {
-    const [userId, requestId, model, reservedAmount, priceSnapshot] = params;
+    const [userId, requestId, model, reservedAmount, priceSnapshot, modality = "text", ttlSeconds = 120] = params;
     const key = keyFor(userId, requestId);
     if (state.ledger.has(key)) return response();
     const id = "ledger-" + (++state.nextId);
     state.ledger.set(key, {
       id, user_id: userId, idem_key: requestId, model,
       reserved_amount: reservedAmount, settled_amount: 0, price_snapshot: priceSnapshot,
-      reserved_until: Date.now() + 120000, status: "held",
+      reserved_until: Date.now() + ttlSeconds * 1000, status: "held", modality,
     });
     return response([{ id }]);
   }
   if (sql.includes("SELECT status, settled_amount, model, reserved_amount")) {
     const row = state.ledger.get(keyFor(params[0], params[1]));
     return response(row ? [row] : []);
+  }
+  if (sql.includes("UPDATE credits SET image_reserved = image_reserved + $1") ||
+      sql.includes("UPDATE credits SET video_reserved = video_reserved + $1")) {
+    const [amount,userId]=params;
+    const row=state.credits.get(userId);
+    const col=sql.includes("image_reserved")?"image_reserved":"video_reserved";
+    const balance=col==="image_reserved"?"image_balance":"video_balance";
+    if(!row || row[balance]-row[col]<amount)return response();
+    row[col]+=amount;
+    return response([],1);
+  }
+  if (sql.includes("UPDATE credits SET image_balance = image_balance - $1") ||
+      sql.includes("UPDATE credits SET video_balance = video_balance - $1")) {
+    const [charged,reserved,userId]=params;
+    const row=state.credits.get(userId);
+    const image=sql.includes("image_balance");
+    const balance=image?"image_balance":"video_balance";
+    const col=image?"image_reserved":"video_reserved";
+    if(!row || row[col]<reserved)return response();
+    row[balance]-=charged;row[col]-=reserved;
+    return response([],1);
+  }
+  if (sql.includes("UPDATE credits SET image_reserved = image_reserved - $1") ||
+      sql.includes("UPDATE credits SET video_reserved = video_reserved - $1")) {
+    const [reserved,userId]=params;
+    const row=state.credits.get(userId);
+    const col=sql.includes("image_reserved")?"image_reserved":"video_reserved";
+    if(!row || row[col]<reserved)return response();
+    row[col]-=reserved;
+    return response([],1);
   }
   if (sql.includes("UPDATE credits SET reserved = reserved + $1")) {
     const [amount, userId] = params;
@@ -71,7 +102,7 @@ async function query(sqlInput, params = []) {
     }
     return response([], removed);
   }
-  if (sql.includes("SELECT id, status, reserved_amount, settled_amount FROM usage_ledger")) {
+  if (sql.includes("SELECT id, status, reserved_amount, settled_amount")) {
     const row = state.ledger.get(keyFor(params[0], params[1]));
     return response(row ? [row] : []);
   }
