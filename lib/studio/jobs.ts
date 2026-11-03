@@ -179,3 +179,114 @@ export async function reclaimStaleJobs(maxAgeSeconds=0,limit=100):Promise<number
     throw error;
   } finally{client.release();}
 }
+
+
+export interface ClaimedMockJob extends StudioJob {
+  prompt:string;max_tokens:number;lease_token:string;attempt_count:number;max_attempts:number;
+  request_id:string;reserved_amount:number;price_snapshot:string;tier:string;
+}
+
+/** Claims the oldest eligible row under a real PostgreSQL row lock. */
+export async function claimNextMockJob(leaseToken:string):Promise<ClaimedMockJob|null> {
+  if(!UUID.test(leaseToken))throw new Error("INVALID_MOCK_LEASE");
+  const client=await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const result=await client.query<ClaimedMockJob>(
+      `SELECT j.*,l.idem_key AS request_id,l.reserved_amount,l.price_snapshot,u.tier
+       FROM studio_jobs j JOIN usage_ledger l ON l.id=j.ledger_id
+       JOIN users u ON u.id=j.user_id
+       WHERE j.status='queued' AND j.execution_mode='mock' AND j.prompt IS NOT NULL
+         AND j.max_tokens IS NOT NULL AND j.attempt_count < j.max_attempts
+         AND l.status='held' AND l.reserved_until > now()
+       ORDER BY j.created_at,j.id FOR UPDATE OF l,j SKIP LOCKED LIMIT 1`,
+    );
+    const job=result.rows[0];
+    if(!job){await client.query("COMMIT");return null;}
+    const updated=await client.query<ClaimedMockJob>(
+      `UPDATE studio_jobs SET status='running',attempt_count=attempt_count+1,
+         started_at=COALESCE(started_at,now()),lease_token=$2,
+         lease_until=now()+interval '60 seconds',last_error_code=NULL
+       WHERE id=$1 AND status='queued' AND attempt_count < max_attempts
+       RETURNING id,attempt_count,lease_token,lease_until,status`,
+      [job.id,leaseToken],
+    );
+    if(updated.rowCount!==1||!updated.rows[0])throw new Error("MOCK_CLAIM_CONFLICT");
+    await client.query("COMMIT");
+    return {...job,...updated.rows[0],lease_token:leaseToken};
+  }catch(error){await client.query("ROLLBACK").catch(()=>undefined);throw error;}
+  finally{client.release();}
+}
+
+/** The provider never ran remotely; fake failures may be retried or refunded at zero. */
+export async function retryOrFailMockJob(job:ClaimedMockJob,errorCode:string):Promise<"queued"|"failed"> {
+  if(!/^[A-Z0-9_]{1,64}$/.test(errorCode))throw new Error("INVALID_MOCK_ERROR_CODE");
+  const client=await getPool().connect();
+  try{
+    await client.query("BEGIN");
+    const row=await client.query<{attempt_count:number;max_attempts:number}>(
+      `SELECT j.attempt_count,j.max_attempts FROM usage_ledger l
+       JOIN studio_jobs j ON j.ledger_id=l.id
+       WHERE j.id=$1 AND j.user_id=$2 AND j.status='running' AND j.lease_token=$3
+         AND l.status='held'
+       FOR UPDATE OF l,j`,
+      [job.id,job.user_id,job.lease_token],
+    );
+    if(row.rowCount!==1||!row.rows[0])throw new StudioInputError(409,"작업 lease가 변경됐습니다.");
+    const terminal=row.rows[0].attempt_count>=row.rows[0].max_attempts;
+    if(terminal){
+      const result=await settleCreditsInTransaction(client,job.user_id,job.request_id,0);
+      if(result.status!=="settled")throw new Error("MOCK_FAILURE_SETTLEMENT_INVARIANT");
+    }
+    const newStatus=terminal?"failed":"queued";
+    const updated=await client.query(
+      `UPDATE studio_jobs SET status=$4,lease_token=NULL,lease_until=NULL,
+       last_error_code=$5,finished_at=CASE WHEN $4='failed' THEN now() ELSE NULL END
+       WHERE id=$1 AND user_id=$2 AND lease_token=$3 AND status='running'`,
+      [job.id,job.user_id,job.lease_token,newStatus,errorCode],
+    );
+    if(updated.rowCount!==1)throw new Error("MOCK_RETRY_INVARIANT");
+    await client.query("COMMIT");
+    return newStatus;
+  }catch(error){await client.query("ROLLBACK").catch(()=>undefined);throw error;}
+  finally{client.release();}
+}
+
+/** Requeue only expired fake leases. An expired *credit hold* is left for the
+ * existing reclaimStaleJobs transaction rather than charged or re-run. */
+export async function recoverExpiredMockLeases(limit=100):Promise<{requeued:number;failed:number}> {
+  if(!Number.isSafeInteger(limit)||limit<1||limit>500)throw new Error("INVALID_RECOVERY_LIMIT");
+  const client=await getPool().connect();
+  let requeued=0,failed=0;
+  try{
+    await client.query("BEGIN");
+    const rows=await client.query<{
+      id:string;user_id:string;idem_key:string;attempt_count:number;max_attempts:number;
+    }>(
+      `SELECT j.id,j.user_id,l.idem_key,j.attempt_count,j.max_attempts
+       FROM usage_ledger l JOIN studio_jobs j ON j.ledger_id=l.id
+       WHERE j.status='running' AND j.execution_mode='mock'
+         AND j.lease_until < now() AND l.status='held' AND l.reserved_until > now()
+       ORDER BY j.lease_until FOR UPDATE OF l,j SKIP LOCKED LIMIT $1`,
+      [limit],
+    );
+    for(const job of rows.rows){
+      const terminal=job.attempt_count>=job.max_attempts;
+      if(terminal){
+        const settled=await settleCreditsInTransaction(client,job.user_id,job.idem_key,0);
+        if(settled.status!=="settled")throw new Error("MOCK_RECOVERY_SETTLEMENT_INVARIANT");
+      }
+      const updated=await client.query(
+        `UPDATE studio_jobs SET status=$2,lease_token=NULL,lease_until=NULL,
+         last_error_code=$3,finished_at=CASE WHEN $2='failed' THEN now() ELSE NULL END
+         WHERE id=$1 AND status='running'`,
+        [job.id,terminal?"failed":"queued",terminal?"MOCK_RETRY_LIMIT":"MOCK_LEASE_EXPIRED"],
+      );
+      if(updated.rowCount!==1)throw new Error("MOCK_RECOVERY_INVARIANT");
+      if(terminal)failed++;else requeued++;
+    }
+    await client.query("COMMIT");
+    return {requeued,failed};
+  }catch(error){await client.query("ROLLBACK").catch(()=>undefined);throw error;}
+  finally{client.release();}
+}
