@@ -1,9 +1,9 @@
 // In-memory query adapter for route-handler tests. Never imported in Next runtime.
 // Real SQL uniqueness/rollback is separately tested against disposable PostgreSQL.
-const state = { users: new Map(), models: new Map(), credits: new Map(), drafts: new Map(), queries: [], sequence: 0 };
+const state = { users: new Map(), models: new Map(), credits: new Map(), drafts: new Map(), orders: new Map(), queries: [], sequence: 0 };
 
 export function resetTestDb() {
-  state.users.clear(); state.models.clear(); state.credits.clear(); state.drafts.clear(); state.queries.length = 0;
+  state.users.clear(); state.models.clear(); state.credits.clear(); state.drafts.clear(); state.orders.clear(); state.queries.length = 0;
   state.sequence = 0;
 }
 export function addUser(row) { state.users.set(row.id, { ...row }); }
@@ -43,6 +43,39 @@ async function query(sqlInput, parameters = []) {
     const user = state.users.get(parameters[0]);
     if (user) user.session_epoch++;
     return { rows: [], rowCount: user ? 1 : 0 };
+  }
+  if (sql.includes("INSERT INTO studio_orders (user_id,service,price_krw")) {
+    const [userId,service,price,paid,cash,minutes,rate,labor,fee,revisions,refund,contribution,
+      outside,rights,accepted,conflict,consent]=parameters;
+    const id="dddddddd-dddd-4ddd-8ddd-"+String(++state.sequence).padStart(12,"0");
+    const row={order_id:id,user_id:userId,revision:1,service,price_krw:price,paid_krw:paid,
+      cash_cost_krw:cash,labor_minutes:minutes,labor_rate_krw:rate,labor_cost_krw:labor,
+      fee_krw:fee,revisions,refund_krw:refund,contribution_krw:contribution,
+      external_customer_flag:outside,rights_checked:rights,delivery_accepted:accepted,
+      conflict_declared:conflict,consent_recorded:consent,updated_at:new Date()};
+    state.orders.set(id,row);
+    return {rows:[{...row}],rowCount:1};
+  }
+  if (sql.includes("FROM studio_orders WHERE user_id=$1 ORDER BY")) {
+    const rows=[...state.orders.values()].filter(row=>row.user_id===parameters[0]).slice(0,50);
+    return {rows:rows.map(row=>({...row})),rowCount:rows.length};
+  }
+  if (sql.includes("FROM studio_orders WHERE order_id=$1 AND user_id=$2")) {
+    const row=state.orders.get(parameters[0]);
+    const match=row?.user_id===parameters[1]?{...row}:undefined;
+    return {rows:match?[match]:[],rowCount:match?1:0};
+  }
+  if (sql.includes("UPDATE studio_orders SET revision=revision+1")) {
+    const [id,userId,rev,service,price,paid,cash,minutes,rate,labor,fee,revisions,refund,contribution,
+      outside,rights,accepted,conflict,consent]=parameters;
+    const row=state.orders.get(id);
+    if (!row || row.user_id!==userId || row.revision!==rev) return {rows:[],rowCount:0};
+    Object.assign(row,{revision:rev+1,service,price_krw:price,paid_krw:paid,cash_cost_krw:cash,
+      labor_minutes:minutes,labor_rate_krw:rate,labor_cost_krw:labor,fee_krw:fee,
+      revisions,refund_krw:refund,contribution_krw:contribution,
+      external_customer_flag:outside,rights_checked:rights,delivery_accepted:accepted,
+      conflict_declared:conflict,consent_recorded:consent,updated_at:new Date()});
+    return {rows:[{...row}],rowCount:1};
   }
   if (sql.includes("INSERT INTO studio_drafts (user_id, brief, content)")) {
     const id = "bbbbbbbb-bbbb-4bbb-8bbb-" + String(++state.sequence).padStart(12, "0");
