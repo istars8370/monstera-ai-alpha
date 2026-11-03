@@ -69,17 +69,29 @@ export async function reserveQueuedJob(input: HoldInput & {modality: CreditModal
 /** Trusted worker completion only. Lock ledger and job in the same transaction
  * as the credit charge. Recovery uses the same row locks, preventing double spend
  * even when a worker and a reclaimer complete at the exact same moment. */
+export interface MockJobCompletion {
+  leaseToken:string;
+  resultText?:string;
+  usage?:{inputTokens:number;outputTokens:number};
+}
 export async function finalizeStudioJob(
   userId: string, jobId: string, requestId: string, charged: number, succeeded: boolean,
+  completion?:MockJobCompletion,
 ): Promise<StudioJob> {
   if (!UUID.test(jobId)) throw new StudioInputError(404,"작업을 찾을 수 없습니다.");
   if (!succeeded && charged !== 0) throw new StudioInputError(400, "실패 작업은 0으로 정산합니다.");
+  if(completion && (!UUID.test(completion.leaseToken) ||
+    (succeeded && (!completion.resultText?.trim() ||
+      completion.resultText.length>15000 || !completion.usage)) ||
+    (!succeeded && (completion.resultText!==undefined || completion.usage!==undefined)))) {
+    throw new StudioInputError(400,"Mock 완료 정보를 확인하세요.");
+  }
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
     const selected = await client.query<StudioJob & {ledger_status: string}>(
       `SELECT j.id,j.user_id,j.ledger_id,j.modality,j.model,j.status,j.provider_job_id,
-        j.created_at,j.finished_at,l.status AS ledger_status
+        j.created_at,j.finished_at,j.lease_token,j.execution_mode,l.status AS ledger_status
        FROM usage_ledger l JOIN studio_jobs j ON j.ledger_id=l.id
        WHERE j.id=$1 AND j.user_id=$2 AND l.user_id=$2 AND l.idem_key=$3
        FOR UPDATE OF l,j`,
@@ -90,14 +102,29 @@ export async function finalizeStudioJob(
     if (!["queued","running"].includes(current.status) || current.ledger_status !== "held") {
       throw new StudioInputError(409,"이미 종료된 작업입니다.");
     }
-    const settlement = await settleCreditsInTransaction(client,userId,requestId,charged);
-    if (settlement.status !== "settled") throw new Error("JOB_SETTLEMENT_INVARIANT_BROKEN");
-    const result = await client.query<StudioJob>(
-      `UPDATE studio_jobs SET status=$3,finished_at=now()
-       WHERE id=$1 AND user_id=$2 AND status IN ('queued','running')
-       RETURNING id,user_id,ledger_id,modality,model,status,provider_job_id,created_at,finished_at`,
-      [jobId,userId,succeeded?"succeeded":"failed"],
+    if(completion && (current.status!=="running" || current.execution_mode!=="mock" ||
+      current.lease_token!==completion.leaseToken)) {
+      throw new StudioInputError(409,"작업 lease가 만료됐거나 다른 워커에 속합니다.");
+    }
+    const settlement = await settleCreditsInTransaction(
+      client,userId,requestId,charged,completion?.usage,
     );
+    if (settlement.status !== "settled") throw new Error("JOB_SETTLEMENT_INVARIANT_BROKEN");
+    const result = completion
+      ? await client.query<StudioJob>(
+        `UPDATE studio_jobs SET status=$3,finished_at=now(),lease_token=NULL,lease_until=NULL,
+         result_text=$5,usage_in_tokens=$6,usage_out_tokens=$7,last_error_code=NULL
+         WHERE id=$1 AND user_id=$2 AND status='running' AND lease_token=$4
+         RETURNING id,user_id,ledger_id,modality,model,status,provider_job_id,created_at,finished_at`,
+        [jobId,userId,succeeded?"succeeded":"failed",completion.leaseToken,
+          completion.resultText??null,completion.usage?.inputTokens??null,
+          completion.usage?.outputTokens??null],
+      ) : await client.query<StudioJob>(
+        `UPDATE studio_jobs SET status=$3,finished_at=now()
+         WHERE id=$1 AND user_id=$2 AND status IN ('queued','running')
+         RETURNING id,user_id,ledger_id,modality,model,status,provider_job_id,created_at,finished_at`,
+        [jobId,userId,succeeded?"succeeded":"failed"],
+      );
     if (result.rowCount !== 1 || !result.rows[0]) throw new Error("JOB_STATE_INVARIANT_BROKEN");
     await client.query("COMMIT");
     return result.rows[0];
@@ -120,6 +147,7 @@ export async function reclaimStaleJobs(maxAgeSeconds=0,limit=100):Promise<number
        FROM usage_ledger l INNER JOIN studio_jobs j ON j.ledger_id=l.id
        WHERE l.status='held' AND j.status IN ('queued','running')
          AND l.reserved_until < now()
+         AND (j.status='queued' OR j.lease_until IS NULL OR j.lease_until < now())
          AND j.created_at < now() - ($1::int * interval '1 second')
        ORDER BY l.reserved_until
        FOR UPDATE OF l,j SKIP LOCKED LIMIT $2`,
