@@ -7,7 +7,7 @@ export interface RouteRequest { modelId: string; fallbackModelId?: string; tier:
 export class RouterError extends Error {
   constructor(public readonly code: string, public readonly status: number) { super(code); this.name = "RouterError"; }
 }
-const tierRank: Record<Tier, number> = { free: 0, creator: 1, studio: 2 };
+export const tierRank: Readonly<Record<Tier, number>> = { free: 0, creator: 1, studio: 2 };
 
 // A provider adapter must not be able to hang the request indefinitely by ignoring AbortSignal.
 async function nextUntilAbort<T>(iterator: AsyncIterator<T>, signal: AbortSignal): Promise<IteratorResult<T>> {
