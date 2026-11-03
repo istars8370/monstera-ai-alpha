@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useState } from "react";
 import type { Tier } from "@/lib/router";
+import { StudioMockGeneration } from "@/components/studio/mock-generation-panel";
 import { REVIEW_CHECKS, type StudioRecord, type Action } from "@/lib/studio/workflow";
 
 const checkLabels: Record<(typeof REVIEW_CHECKS)[number],string> = {
@@ -94,6 +95,12 @@ export function StudioWorkspace({tier}:{tier:Tier}) {
       <label className="block text-sm">제작 목적
         <input className="mt-1 w-full rounded border p-2 text-black" value={purpose} onChange={e=>setPurpose(e.target.value)} maxLength={300}/></label>
     </div>
+    <StudioMockGeneration brand={brand} purpose={purpose}
+      onDraft={draft=>{
+        activate(draft);
+        setDrafts(current=>[draft,...current.filter(item=>item.id!==draft.id)]);
+        setMessage("Mock 작업 결과를 수동 검수할 초안으로 불러왔습니다.");
+      }}/>
     <div className="flex flex-wrap gap-2">
       <button type="button" disabled={busy} className="rounded border px-4 py-2 disabled:opacity-50" onClick={create}>데모 초안 서버 저장</button>
       <button type="button" disabled={busy} className="rounded border px-4 py-2 disabled:opacity-50" onClick={reload}>저장된 초안 불러오기</button>
