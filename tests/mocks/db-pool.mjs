@@ -1,9 +1,9 @@
 // In-memory query adapter for route-handler tests. Never imported in Next runtime.
 // Real SQL uniqueness/rollback is separately tested against disposable PostgreSQL.
-const state = { users: new Map(), models: new Map(), credits: new Map(), queries: [], sequence: 0 };
+const state = { users: new Map(), models: new Map(), credits: new Map(), drafts: new Map(), queries: [], sequence: 0 };
 
 export function resetTestDb() {
-  state.users.clear(); state.models.clear(); state.credits.clear(); state.queries.length = 0;
+  state.users.clear(); state.models.clear(); state.credits.clear(); state.drafts.clear(); state.queries.length = 0;
   state.sequence = 0;
 }
 export function addUser(row) { state.users.set(row.id, { ...row }); }
@@ -43,6 +43,34 @@ async function query(sqlInput, parameters = []) {
     const user = state.users.get(parameters[0]);
     if (user) user.session_epoch++;
     return { rows: [], rowCount: user ? 1 : 0 };
+  }
+  if (sql.includes("INSERT INTO studio_drafts (user_id, brief, content)")) {
+    const id = "bbbbbbbb-bbbb-4bbb-8bbb-" + String(++state.sequence).padStart(12, "0");
+    const row = {id, user_id:parameters[0],revision:1,state:"DRAFT",
+      brief:JSON.parse(parameters[1]),content:JSON.parse(parameters[2]),checks:null,
+      updated_at:new Date()};
+    state.drafts.set(id,row);
+    return {rows:[{...row}],rowCount:1};
+  }
+  if (sql.includes("FROM studio_drafts WHERE user_id = $1 ORDER BY")) {
+    const rows=[...state.drafts.values()].filter(row=>row.user_id===parameters[0])
+      .sort((a,b)=>b.updated_at.getTime()-a.updated_at.getTime()).slice(0,50);
+    return {rows:rows.map(row=>({...row})),rowCount:rows.length};
+  }
+  if (sql.includes("FROM studio_drafts WHERE id = $1 AND user_id = $2")) {
+    const row=state.drafts.get(parameters[0]);
+    const match=row?.user_id===parameters[1]?{...row}:undefined;
+    return {rows:match?[match]:[],rowCount:match?1:0};
+  }
+  if (sql.includes("UPDATE studio_drafts")) {
+    const [id,userId,revision,status,content,checks,previousRevision]=parameters;
+    const row=state.drafts.get(id);
+    if (!row || row.user_id!==userId || row.revision!==previousRevision) {
+      return {rows:[],rowCount:0};
+    }
+    Object.assign(row,{revision,state:status,content:JSON.parse(content),checks:checks?JSON.parse(checks):null,
+      updated_at:new Date()});
+    return {rows:[{...row}],rowCount:1};
   }
   if (sql.includes("FROM users WHERE id = $1")) {
     const user = state.users.get(parameters[0]);
