@@ -1,4 +1,5 @@
 import { getPool } from "@/db/pool";
+import type { PoolClient } from "@neondatabase/serverless";
 
 export type HoldResult =
   | { status: "held"; ledgerId: string }
@@ -36,7 +37,7 @@ export function assertCompatibleHold(
   }
 }
 
-export type BillingClient = Awaited<ReturnType<ReturnType<typeof getPool>["connect"]>>;
+export type BillingClient = PoolClient;
 
 // 모든 예약은 한 트랜잭션에서 멱등 게이트를 먼저 통과한다.
 export async function holdCreditsInTransaction(client: BillingClient, input: HoldInput): Promise<HoldResult> {
