@@ -49,9 +49,15 @@ export async function reserveQueuedJob(input:HoldInput & {modality:CreditModalit
 export async function finalizeStudioJob(userId:string,jobId:string,requestId:string,
   charged:number,succeeded:boolean):Promise<StudioJob> {
   const current=await getStudioJob(userId,jobId);
-  if(!["queued","running","succeeded","failed"].includes(current.status)) {
-    throw new StudioInputError(409,"이미 회수한 작업입니다.");
+  if(!["queued","running"].includes(current.status)) {
+    throw new StudioInputError(409,"이미 종료된 작업입니다.");
   }
+  if(!succeeded && charged!==0)throw new StudioInputError(400,"실패 작업은 0으로 정산합니다.");
+  const ledger=await getPool().query<{id:string}>(
+    "SELECT id FROM usage_ledger WHERE id=$1 AND user_id=$2 AND idem_key=$3 LIMIT 1",
+    [current.ledger_id,userId,requestId],
+  );
+  if(ledger.rowCount!==1)throw new StudioInputError(409,"작업 예약 정보가 일치하지 않습니다.");
   const settlement=await settleCredits(userId,requestId,charged);
   if(settlement.status!=="settled")throw new StudioInputError(409,"회수됐거나 없는 예약입니다.");
   const result=await getPool().query<StudioJob>(
