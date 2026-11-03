@@ -102,6 +102,9 @@ export async function finalizeStudioJob(
     if (!["queued","running"].includes(current.status) || current.ledger_status !== "held") {
       throw new StudioInputError(409,"이미 종료된 작업입니다.");
     }
+    if(current.lease_token && !completion) {
+      throw new StudioInputError(409,"lease가 있는 작업은 일반 정산 경로에서 완료할 수 없습니다.");
+    }
     if(completion && (current.status!=="running" || current.execution_mode!=="mock" ||
       current.lease_token!==completion.leaseToken)) {
       throw new StudioInputError(409,"작업 lease가 만료됐거나 다른 워커에 속합니다.");
