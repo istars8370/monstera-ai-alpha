@@ -9,7 +9,7 @@ export async function readStudioJson(request: Request, maxBytes = 64 * 1024): Pr
     throw new StudioInputError(415, "JSON 요청만 허용합니다.");
   }
   const length = request.headers.get("content-length");
-  if (length !== null && /^\\d+$/.test(length) && Number(length) > maxBytes) {
+  if (length !== null && /^[0-9]+$/.test(length) && Number(length) > maxBytes) {
     throw new StudioInputError(413, "요청 크기를 초과했습니다.");
   }
   if (!request.body) throw new StudioInputError(400, "요청 본문이 없습니다.");
