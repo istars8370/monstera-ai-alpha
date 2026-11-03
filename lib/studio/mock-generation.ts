@@ -43,10 +43,18 @@ export async function submitMockGeneration(
   const snapshot:MockJobPriceSnapshot={...price,inputTokenCeiling:preflight.inputTokenCeiling,
     maxTokens:preflight.maxTokens,mockOnly:true};
   // holdCreditsInTransaction re-checks balance and idempotency under a row lock.
-  const job=await reserveQueuedJob({
-    userId,requestId:input.requestId,modality:"text",ttlSeconds:120,model:input.modelId,
-    reserved:preflight.maximumReservedCredits,priceSnapshot:JSON.stringify(snapshot),
-    prompt:input.prompt,maxTokens:preflight.maxTokens,
-  });
+  let job:StudioJob;
+  try {
+    job=await reserveQueuedJob({
+      userId,requestId:input.requestId,modality:"text",ttlSeconds:120,model:input.modelId,
+      reserved:preflight.maximumReservedCredits,priceSnapshot:JSON.stringify(snapshot),
+      prompt:input.prompt,maxTokens:preflight.maxTokens,
+    });
+  } catch(error) {
+    if(error instanceof Error && error.message==="IDEMPOTENCY_KEY_REUSED") {
+      throw new StudioInputError(409,"같은 requestId는 다른 모델·금액에 재사용할 수 없습니다.");
+    }
+    throw error;
+  }
   return {job,maximumReservedCredits:preflight.maximumReservedCredits,mockOnly:true};
 }
