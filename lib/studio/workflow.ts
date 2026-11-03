@@ -37,9 +37,11 @@ export function applyAction(record: StudioRecord, action: Action, revision: numb
   if (action === "edit") return {...record,content:validateContent(payload.content),state:"DRAFT",checks:null,revision:revision+1};
   if (action === "review" && record.state === "DRAFT") return {...record,state:"REVIEW_REQUIRED",revision:revision+1};
   if (action === "approve" && record.state === "REVIEW_REQUIRED") {
-    const checks = payload.checks as Record<string,unknown> | undefined;
+    const checks = payload.checks && typeof payload.checks === "object" && !Array.isArray(payload.checks)
+      ? payload.checks as Record<string, unknown> : undefined;
     if (!checks || !REVIEW_CHECKS.every(key=>checks[key]===true)) throw new StudioInputError(400,"5개 검수 항목을 확인하세요.");
-    return {...record,state:"APPROVED",checks:checks as StudioRecord["checks"],revision:revision+1};
+    const approvedChecks = Object.fromEntries(REVIEW_CHECKS.map(key => [key, true])) as StudioRecord["checks"];
+    return {...record,state:"APPROVED",checks:approvedChecks,revision:revision+1};
   }
   if (action === "export" && (record.state === "APPROVED" || record.state === "EXPORTED")) return {...record,state:"EXPORTED",revision:revision+1};
   throw new StudioInputError(409,"현재 상태에서 실행할 수 없습니다.");
