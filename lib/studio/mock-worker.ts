@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import type { ProviderAdapter } from "@/lib/providers/types";
 import { DatabaseModelRegistry } from "@/lib/model-registry";
 import { ModelRouter, type Tier } from "@/lib/router";
 import { studioTextActualCredits, type StudioCreditPriceSnapshot } from "@/lib/studio/generation-policy";
@@ -36,9 +35,10 @@ export interface MockTickResult {
  * Provider errors are retried safely; settlement errors propagate and remain held for lease recovery.
  */
 export async function processNextMockJob(
-  adapter:ProviderAdapter=new StudioMockProvider(),timeoutMs=10000,
+  adapter:StudioMockProvider=new StudioMockProvider(),timeoutMs=10000,
 ):Promise<MockTickResult|null> {
   requireMockStudio();
+  if(!(adapter instanceof StudioMockProvider))throw new Error("ONLY_OFFLINE_MOCK_ADAPTER_ALLOWED");
   if(!Number.isSafeInteger(timeoutMs)||timeoutMs<10||timeoutMs>60000)throw new Error("INVALID_MOCK_TIMEOUT");
   const job=await claimNextMockJob(randomUUID());
   if(!job)return null;
@@ -94,7 +94,7 @@ export async function processNextMockJob(
   return {jobId:job.id,status:"succeeded",chargedCredits:completed.charged,mockOnly:true};
 }
 
-export async function runMockWorkerTick(adapter?:ProviderAdapter):Promise<{
+export async function runMockWorkerTick(adapter?:StudioMockProvider):Promise<{
   recovered:{requeued:number;failed:number};reclaimed:number;result:MockTickResult|null;
 }> {
   requireMockStudio();
