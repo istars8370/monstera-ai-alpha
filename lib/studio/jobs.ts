@@ -12,12 +12,17 @@ export type StudioJobStatus="queued"|"running"|"succeeded"|"failed"|"reclaimed";
 export interface StudioJob {
   id:string;user_id:string;ledger_id:string;modality:CreditModality;model:string;
   status:StudioJobStatus;provider_job_id:string|null;created_at:Date;finished_at:Date|null;
+  prompt?:string|null;max_tokens?:number|null;attempt_count?:number;max_attempts?:number;
+  lease_token?:string|null;lease_until?:Date|null;started_at?:Date|null;
+  last_error_code?:string|null;result_text?:string|null;
+  usage_in_tokens?:number|null;usage_out_tokens?:number|null;
+  result_draft_id?:string|null;execution_mode?:string;
 }
 
 export async function getStudioJob(userId:string,id:string):Promise<StudioJob> {
   if(!UUID.test(id))throw new StudioInputError(404,"작업을 찾을 수 없습니다.");
   const result=await getPool().query<StudioJob>(
-    "SELECT id,user_id,ledger_id,modality,model,status,provider_job_id,created_at,finished_at FROM studio_jobs WHERE id=$1 AND user_id=$2 LIMIT 1",
+    "SELECT id,user_id,ledger_id,modality,model,status,provider_job_id,created_at,finished_at,prompt,max_tokens,attempt_count,max_attempts,lease_until,last_error_code,result_text,usage_in_tokens,usage_out_tokens,result_draft_id,execution_mode FROM studio_jobs WHERE id=$1 AND user_id=$2 LIMIT 1",
     [id,userId],
   );
   if(!result.rows[0])throw new StudioInputError(404,"작업을 찾을 수 없습니다.");
@@ -26,19 +31,32 @@ export async function getStudioJob(userId:string,id:string):Promise<StudioJob> {
 
 /** Reservation and job insertion are an indivisible DB operation. No compensating
  * settlement or catch-up timer is required if insertion fails or the process dies. */
-export async function reserveQueuedJob(input: HoldInput & {modality: CreditModality}): Promise<StudioJob> {
+export async function reserveQueuedJob(input: HoldInput & {modality: CreditModality; prompt?:string; maxTokens?:number}): Promise<StudioJob> {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
     const hold = await holdCreditsInTransaction(client, input);
     if (hold.status === "insufficient") throw new StudioInputError(402, "크레딧이 부족합니다.");
     if (hold.status !== "held") throw new StudioInputError(409, "중복 요청입니다.");
-    const result = await client.query<StudioJob>(
-      `INSERT INTO studio_jobs(user_id,ledger_id,modality,model,status)
-       VALUES ($1,$2,$3,$4,'queued')
-       RETURNING id,user_id,ledger_id,modality,model,status,provider_job_id,created_at,finished_at`,
-      [input.userId,hold.ledgerId,input.modality,input.model],
-    );
+    const isGeneration=typeof input.prompt==="string" && input.maxTokens!==undefined;
+    if(isGeneration && (input.modality!=="text" || !input.prompt ||
+      input.prompt.length>8192 || !Number.isSafeInteger(input.maxTokens) ||
+      (input.maxTokens as number)<1 || (input.maxTokens as number)>16384)) {
+      throw new StudioInputError(400,"생성 작업 입력을 확인하세요.");
+    }
+    const result = isGeneration
+      ? await client.query<StudioJob>(
+        `INSERT INTO studio_jobs(user_id,ledger_id,modality,model,status,prompt,max_tokens,execution_mode)
+         VALUES ($1,$2,$3,$4,'queued',$5,$6,'mock')
+         RETURNING id,user_id,ledger_id,modality,model,status,provider_job_id,created_at,finished_at`,
+        [input.userId,hold.ledgerId,input.modality,input.model,input.prompt,input.maxTokens],
+      )
+      : await client.query<StudioJob>(
+        `INSERT INTO studio_jobs(user_id,ledger_id,modality,model,status)
+         VALUES ($1,$2,$3,$4,'queued')
+         RETURNING id,user_id,ledger_id,modality,model,status,provider_job_id,created_at,finished_at`,
+        [input.userId,hold.ledgerId,input.modality,input.model],
+      );
     if (result.rowCount !== 1 || !result.rows[0]) throw new Error("STUDIO_JOB_INSERT_FAILED");
     await client.query("COMMIT");
     return result.rows[0];
