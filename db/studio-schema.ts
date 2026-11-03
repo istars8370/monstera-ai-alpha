@@ -1,4 +1,4 @@
-import { boolean, check, date, index, integer, jsonb, pgTable, primaryKey, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+import { boolean, check, date, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { usageLedger, users } from "@/db/schema";
 
@@ -63,11 +63,31 @@ export const studioJobs = pgTable("studio_jobs", {
   model: varchar("model", {length:512}).notNull(),
   status: varchar("status", {length:16}).notNull().default("queued"),
   providerJobId: varchar("provider_job_id", {length:512}),
+  // Work remains persisted across process restarts; never log stored prompts or results.
+  prompt: text("prompt"),
+  maxTokens: integer("max_tokens"),
+  attemptCount: integer("attempt_count").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(3),
+  leaseToken: uuid("lease_token"),
+  leaseUntil: timestamp("lease_until", {withTimezone:true}),
+  startedAt: timestamp("started_at", {withTimezone:true}),
+  lastErrorCode: varchar("last_error_code", {length:96}),
+  resultText: text("result_text"),
+  usageInTokens: integer("usage_in_tokens"),
+  usageOutTokens: integer("usage_out_tokens"),
+  resultDraftId: uuid("result_draft_id").references(() => studioDrafts.id, {onDelete:"set null"}),
+  // Worker mode cannot accidentally be changed to live without a new reviewed migration.
+  executionMode: varchar("execution_mode", {length:16}).notNull().default("mock"),
   createdAt: timestamp("created_at", {withTimezone:true}).notNull().defaultNow(),
   finishedAt: timestamp("finished_at", {withTimezone:true}),
 }, (table) => [
   index("studio_jobs_status_created_idx").on(table.status,table.createdAt),
   index("studio_jobs_owner_created_idx").on(table.userId,table.createdAt),
+  index("studio_jobs_lease_idx").on(table.status,table.leaseUntil),
+  uniqueIndex("studio_jobs_ledger_id_unique").on(table.ledgerId),
+  check("studio_jobs_attempts_valid",sql`${table.attemptCount} >= 0 AND ${table.maxAttempts} BETWEEN 1 AND 5 AND ${table.attemptCount} <= ${table.maxAttempts}`),
+  check("studio_jobs_mock_only",sql`${table.executionMode} = 'mock'`),
+  check("studio_jobs_token_limits",sql`(${table.maxTokens} IS NULL OR ${table.maxTokens} BETWEEN 1 AND 16384) AND (${table.usageInTokens} IS NULL OR ${table.usageInTokens} >= 0) AND (${table.usageOutTokens} IS NULL OR ${table.usageOutTokens} >= 0)`),
   check("studio_jobs_modality_allowed",sql`${table.modality} IN ('text','image','video','audio')`),
   check("studio_jobs_status_allowed",sql`${table.status} IN ('queued','running','succeeded','failed','reclaimed')`),
 ]);
