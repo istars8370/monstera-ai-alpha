@@ -7,6 +7,7 @@ export interface ChatRequest {
   model: string;
   messages: readonly ChatMessage[];
   signal?: AbortSignal;
+  maxTokens?: number;
 }
 export interface Chunk {
   type: "delta" | "usage" | "done";
