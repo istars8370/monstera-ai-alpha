@@ -12,6 +12,11 @@ export function seedBillingCredit(userId, balance, reserved = 0, wallets = {}) {
 }
 export function billingCredit(userId) {
   const row = state.credits.get(userId);
+  // Preserve the legacy two-field public mock contract.
+  return row ? { balance:row.balance, reserved:row.reserved } : null;
+}
+export function billingWallet(userId) {
+  const row = state.credits.get(userId);
   return row ? { ...row } : null;
 }
 export function billingLedger(userId, requestId) {
