@@ -78,10 +78,8 @@ test("preflight reserves an integer upper bound without floating point underchar
     inputCreditsPerMillionTokens:1,outputCreditsPerMillionTokens:1},1,1),{
     inputTokenCeiling:8193,maximumReservedCredits:2,
   });
-  assert.throws(()=>computeStudioTextReservation({
-    ...price,inputCreditsPerMillionTokens:1_000_000_000,
-    outputCreditsPerMillionTokens:1_000_000_000,
-  },24000,16384),/OUT_OF_RANGE/);
+  assert.throws(()=>computeStudioTextReservation(price,24001,128),/INVALID/);
+  assert.throws(()=>computeStudioTextReservation(price,100,20000),/INVALID/);
 });
 test("preflight endpoint: session, Origin and consent are enforced",async()=>{
   assert.equal((await preflight(request(sample,{cookie:""}))).status,401);
