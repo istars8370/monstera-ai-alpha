@@ -197,3 +197,27 @@ export async function evaluateStudioTextPreflight(
     priceReviewedAt: policy.reviewedAt,
   };
 }
+
+/** Account for trusted provider-reported usage only, not client-supplied numbers.
+ * Never silently charge above the originally reserved upper bound. */
+export function studioTextActualCredits(
+  policy: StudioCreditPriceSnapshot,
+  usage: {inputTokens: number; outputTokens: number},
+  limits: {inputTokenCeiling: number; maxTokens: number; reserved: number},
+): number {
+  const {inputTokens,outputTokens}=usage;
+  if(!Number.isSafeInteger(inputTokens)||!Number.isSafeInteger(outputTokens)||
+    inputTokens<0||outputTokens<0||
+    inputTokens>limits.inputTokenCeiling||outputTokens>limits.maxTokens||
+    !Number.isSafeInteger(limits.reserved)||limits.reserved<1||
+    !validPositiveRate(policy.inputCreditsPerMillionTokens)||
+    !validPositiveRate(policy.outputCreditsPerMillionTokens)) {
+    throw new Error("STUDIO_USAGE_UNVERIFIED");
+  }
+  const cost=ceilDivide(BigInt(inputTokens)*BigInt(policy.inputCreditsPerMillionTokens),MILLION)+
+    ceilDivide(BigInt(outputTokens)*BigInt(policy.outputCreditsPerMillionTokens),MILLION);
+  if(cost>BigInt(limits.reserved)||cost>MAX_RESERVATION) {
+    throw new Error("STUDIO_USAGE_EXCEEDS_HOLD");
+  }
+  return Number(cost);
+}
