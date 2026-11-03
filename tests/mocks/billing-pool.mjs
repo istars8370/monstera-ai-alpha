@@ -134,7 +134,9 @@ async function query(sqlInput, params = []) {
     return response([],1);
   }
   if (sql.includes("UPDATE credits SET image_reserved = image_reserved - $1") ||
-      sql.includes("UPDATE credits SET video_reserved = video_reserved - $1")) {
+      sql.includes("UPDATE credits SET video_reserved = video_reserved - $1") ||
+      sql.includes("UPDATE credits SET image_reserved=image_reserved-$1") ||
+      sql.includes("UPDATE credits SET video_reserved=video_reserved-$1")) {
     const [reserved,userId]=params;
     const row=state.credits.get(userId);
     const col=sql.includes("image_reserved")?"image_reserved":"video_reserved";
@@ -181,14 +183,16 @@ async function query(sqlInput, params = []) {
         ![...state.jobs.values()].some(job=>job.ledger_id===row.id && ["queued","running"].includes(job.status)))
       .slice(0, params[0]));
   }
-  if (sql.includes("UPDATE credits SET reserved = reserved - $1")) {
+  if (sql.includes("UPDATE credits SET reserved = reserved - $1") ||
+      sql.includes("UPDATE credits SET reserved=reserved-$1")) {
     const [reserved, userId] = params;
     const row = state.credits.get(userId);
     if (!row || row.reserved < reserved) return response();
     row.reserved -= reserved;
     return response([], 1);
   }
-  if (sql.includes("UPDATE usage_ledger SET status = 'reclaimed'")) {
+  if (sql.includes("UPDATE usage_ledger SET status = 'reclaimed'") ||
+      sql.includes("UPDATE usage_ledger SET status='reclaimed'")) {
     const row = [...state.ledger.values()].find(x => x.id === params[0]);
     if (!row) return response();
     row.status = "reclaimed";
