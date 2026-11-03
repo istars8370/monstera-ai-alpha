@@ -1,13 +1,14 @@
 // In-memory query adapter for route-handler tests. Never imported in Next runtime.
 // Real SQL uniqueness/rollback is separately tested against disposable PostgreSQL.
-const state = { users: new Map(), models: new Map(), credits: new Map(), drafts: new Map(), orders: new Map(), grants: new Map(), queries: [], sequence: 0 };
+const state = { users: new Map(), models: new Map(), credits: new Map(), drafts: new Map(), orders: new Map(), grants: new Map(), jobs: new Map(), queries: [], sequence: 0 };
 
 export function resetTestDb() {
-  state.users.clear(); state.models.clear(); state.credits.clear(); state.drafts.clear(); state.orders.clear(); state.grants.clear(); state.queries.length = 0;
+  state.users.clear(); state.models.clear(); state.credits.clear(); state.drafts.clear(); state.orders.clear(); state.grants.clear(); state.jobs.clear(); state.queries.length = 0;
   state.sequence = 0;
 }
 export function addUser(row) { state.users.set(row.id, { ...row }); }
 export function addModel(row) { state.models.set(row.id, { ...row }); }
+export function seedStudioResultJob(row) {state.jobs.set(row.id,{...row});}
 export function addCredits(userId, balance, reserved = 0) { state.credits.set(userId, { balance, reserved, image_balance:0, video_balance:0 }); }
 export function queries() { return [...state.queries]; }
 export function findUserByGoogleSub(sub) { return [...state.users.values()].find(row => row.google_sub === sub); }
@@ -91,7 +92,19 @@ async function query(sqlInput, parameters = []) {
       conflict_declared:conflict,consent_recorded:consent,updated_at:new Date()});
     return {rows:[{...row}],rowCount:1};
   }
-  if (sql.includes("INSERT INTO studio_drafts (user_id, brief, content)")) {
+  if (sql.includes("SELECT status,execution_mode,result_text,result_draft_id") &&
+      sql.includes("FROM studio_jobs WHERE id=$1 AND user_id=$2 FOR UPDATE")) {
+    const row=state.jobs.get(parameters[0]);
+    return {rows:row?.user_id===parameters[1]?[{...row}]:[],rowCount:row?.user_id===parameters[1]?1:0};
+  }
+  if (sql.includes("UPDATE studio_jobs SET result_draft_id=$3")) {
+    const [id,userId,draftId]=parameters,row=state.jobs.get(id);
+    if(!row||row.user_id!==userId||row.result_draft_id)return {rows:[],rowCount:0};
+    row.result_draft_id=draftId;
+    return {rows:[],rowCount:1};
+  }
+  if (sql.includes("INSERT INTO studio_drafts(user_id,brief,content)") ||
+      sql.includes("INSERT INTO studio_drafts (user_id, brief, content)")) {
     const id = "bbbbbbbb-bbbb-4bbb-8bbb-" + String(++state.sequence).padStart(12, "0");
     const row = {id, user_id:parameters[0],revision:1,state:"DRAFT",
       brief:JSON.parse(parameters[1]),content:JSON.parse(parameters[2]),checks:null,
@@ -104,7 +117,8 @@ async function query(sqlInput, parameters = []) {
       .sort((a,b)=>b.updated_at.getTime()-a.updated_at.getTime()).slice(0,50);
     return {rows:rows.map(row=>({...row})),rowCount:rows.length};
   }
-  if (sql.includes("FROM studio_drafts WHERE id = $1 AND user_id = $2")) {
+  if (sql.includes("FROM studio_drafts WHERE id = $1 AND user_id = $2") ||
+      sql.includes("FROM studio_drafts WHERE id=$1 AND user_id=$2")) {
     const row=state.drafts.get(parameters[0]);
     const match=row?.user_id===parameters[1]?{...row}:undefined;
     return {rows:match?[match]:[],rowCount:match?1:0};
@@ -131,6 +145,10 @@ async function query(sqlInput, parameters = []) {
     const models = [...state.models.values()].filter(m => m.enabled && parameters[0].includes(m.id));
     return { rows: models, rowCount: models.length };
   }
+  if (sql.includes("FROM model_registry") && sql.includes("provider='openai'")) {
+    const models=[...state.models.values()].filter(m=>m.enabled && m.provider==="openai");
+    return {rows:models,rowCount:models.length};
+  }
   if (sql.includes("FROM model_registry WHERE enabled = true ORDER BY")) {
     const models = [...state.models.values()].filter(m => m.enabled);
     return { rows: models, rowCount: models.length };
@@ -152,6 +170,8 @@ const pool = {
             users: new Map([...state.users].map(([id, user]) => [id, { ...user }])),
             credits: new Map([...state.credits].map(([id, credit]) => [id, { ...credit }])),
             grants: new Map([...state.grants].map(([key, grant]) => [key, { ...grant }])),
+            jobs: new Map([...state.jobs].map(([id,job])=>[id,{...job}])),
+            drafts: new Map([...state.drafts].map(([id,draft])=>[id,{...draft}])),
             sequence: state.sequence,
           };
           return { rows: [], rowCount: null };
@@ -162,6 +182,8 @@ const pool = {
             state.users = snapshot.users;
             state.credits = snapshot.credits;
             state.grants = snapshot.grants;
+            state.jobs = snapshot.jobs;
+            state.drafts = snapshot.drafts;
             state.sequence = snapshot.sequence;
           }
           snapshot = undefined;
