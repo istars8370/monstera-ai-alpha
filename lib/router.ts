@@ -3,7 +3,7 @@ import type { ChatRequest, Chunk, ProviderAdapter } from "./providers/types";
 export type Tier = "free" | "creator" | "studio";
 export interface RegistryModel { id: string; provider: string; upstreamId: string; tierMin: Tier; enabled: boolean; }
 export interface RegistryReader { findEnabled(id: string): Promise<RegistryModel | null>; }
-export interface RouteRequest { modelId: string; fallbackModelId?: string; tier: Tier; messages: ChatRequest["messages"]; signal?: AbortSignal; }
+export interface RouteRequest { modelId: string; fallbackModelId?: string; tier: Tier; messages: ChatRequest["messages"]; signal?: AbortSignal; maxTokens?: number; }
 export class RouterError extends Error {
   constructor(public readonly code: string, public readonly status: number) { super(code); this.name = "RouterError"; }
 }
@@ -49,7 +49,7 @@ export class ModelRouter {
       req.signal?.addEventListener("abort", onAbort, { once: true });
       if (req.signal?.aborted) controller.abort();
       const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-      const iterator = this.adapters[model.provider].chatStream({ model: model.upstreamId, messages: req.messages, signal: controller.signal })[Symbol.asyncIterator]();
+      const iterator = this.adapters[model.provider].chatStream({ model: model.upstreamId, messages: req.messages, signal: controller.signal, maxTokens: req.maxTokens })[Symbol.asyncIterator]();
       let committed = false;
       try {
         const first = await nextUntilAbort(iterator, controller.signal);
