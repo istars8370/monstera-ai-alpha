@@ -116,7 +116,7 @@ export async function importMockJobAsDraft(userId:string,jobId:string,rawBrief:u
     }
     const content=validateContent({
       post:job.result_text.slice(0,14500),
-      hashtags:"#"+brief.brand.replace(/[^\\p{L}\\p{N}]/gu,"").slice(0,40),
+      hashtags:"#"+brief.brand.replace(/[^\p{L}\p{N}]/gu,"").slice(0,40),
       imagePrompt:"Mock은 텍스트만 생성했습니다. 이미지 제작이나 외부 게시를 수행하지 않았습니다.",
     });
     const created=await client.query<DraftRow>(
