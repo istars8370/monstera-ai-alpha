@@ -59,7 +59,14 @@ jobs:
       - name: Assert Drizzle migration matches current schema
         run: |
           pnpm exec drizzle-kit generate --config=drizzle.config.ts
-          test -z "$(git status --porcelain -- db/migrations)"
+          if [ -n "$(git status --porcelain -- db/migrations)" ]; then
+            git status --porcelain -- db/migrations | cut -c4- | while IFS= read -r file; do
+              printf 'STUDIO_GENERATED_FILE:%s\n' "$file"
+              base64 -w0 "$file"
+              printf '\nSTUDIO_GENERATED_END\n'
+            done
+            exit 1
+          fi
       - name: Apply SQL and check isolated credit ledger invariants
         run: |
           set -eu
@@ -102,7 +109,7 @@ jobs:
             psql -h 127.0.0.1 -U integration_user -d monstera_disposable_restore \
               -v ON_ERROR_STOP=1 -tAc \
               "SELECT CASE WHEN
-                 (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE') = 6
+                 (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE') = 9
                  AND (SELECT balance=80 AND reserved=0 FROM credits c JOIN users u ON u.id=c.user_id WHERE u.email='ledger-test@example.invalid')
                  AND (SELECT reserved=80 FROM credits c JOIN users u ON u.id=c.user_id WHERE u.email='concurrent-test@example.invalid')
                  AND (SELECT COUNT(*) FROM usage_ledger WHERE idem_key='request-1' AND status='settled') = 1
