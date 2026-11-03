@@ -1,0 +1,144 @@
+name: MONSTERA Autodev Pilot (guarded)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 0 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: monstera-autodev-pilot
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    if: vars.MONSTERA_AUTODEV_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      proceed: ${{ steps.gate.outputs.proceed }}
+    steps:
+      - name: Check expiry and existing autodev draft
+        id: gate
+        env:
+          END_DATE: ${{ vars.MONSTERA_AUTODEV_END_DATE }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$END_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+            echo "::error::Set the end-date variable as YYYY-MM-DD (KST)"
+            exit 1
+          fi
+          today="$(TZ=Asia/Seoul date +%F)"
+          if [[ "$today" > "$END_DATE" ]]; then
+            echo 'proceed=false' >> "$GITHUB_OUTPUT"
+            echo "Trial expired; no AI call"
+            exit 0
+          fi
+          existing="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --json headRefName --jq '.[] | select(.headRefName | startswith("autodev/pilot-")) | .headRefName' | head -n 1)"
+          if [[ -n "$existing" ]]; then
+            echo 'proceed=false' >> "$GITHUB_OUTPUT"
+            echo "An autodev draft is already open; no new AI call"
+            exit 0
+          fi
+          echo 'proceed=true' >> "$GITHUB_OUTPUT"
+
+  agent:
+    needs: gate
+    if: needs.gate.outputs.proceed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      proposal: ${{ steps.codex.outputs.final-message }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # The AI action is deliberately the LAST step; this job has no GitHub write token.
+      - name: Produce bounded read-only test proposal
+        id: codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          safety-strategy: drop-sudo
+          permission-profile: ':read-only'
+          prompt-file: .github/autodev/PROMPT.md
+          output-schema-file: .github/autodev/PROPOSAL.schema.json
+
+  verify:
+    needs: agent
+    if: needs.agent.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      has_patch: ${{ steps.verify.outputs.has_patch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Inspect output as untrusted data; never execute generated code
+        id: verify
+        env:
+          AUTODEV_PROPOSAL: ${{ needs.agent.outputs.proposal }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/autodev/validate_proposal.py
+
+  publish_draft:
+    needs: [agent, verify]
+    if: needs.verify.outputs.has_patch == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: true
+      - name: Validate again and stage ONLY the approved test-file path
+        env:
+          AUTODEV_PROPOSAL: ${{ needs.agent.outputs.proposal }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/autodev/validate_proposal.py
+          git apply --index -- .autodev.patch
+          git diff --cached --check
+          changed="$(git diff --cached --name-only)"
+          if [[ ! "$changed" =~ ^tests/autodev/[a-z0-9][a-z0-9-]*\.test\.mjs$ ]]; then
+            echo "::error::Only one isolated regression test is allowed"
+            exit 1
+          fi
+          echo "Verified staging scope: $changed"
+      - name: Open one Draft PR, never merge or force push
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch="autodev/pilot-$GITHUB_RUN_ID"
+          git switch -c "$branch"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -c core.hooksPath=/dev/null commit -m 'test(autodev): propose bounded regression test'
+          git push origin "HEAD:refs/heads/$branch"
+          gh pr create \
+            --repo "$GITHUB_REPOSITORY" \
+            --base main \
+            --head "$branch" \
+            --draft \
+            --title "test(autodev): isolated pilot regression test #$GITHUB_RUN_ID" \
+            --body-file .autodev-body.md
