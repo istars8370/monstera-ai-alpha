@@ -4,7 +4,7 @@ import { outputTokenLimit } from "@/lib/providers/limits";
 import { tierRank, type Tier } from "@/lib/router";
 import { StudioInputError } from "@/lib/studio/workflow";
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MILLION = 1_000_000n;
 const MAX_RESERVATION = 2_147_483_647n;
 const PRICE_POLICY_ENV = "MONSTERA_STUDIO_TEXT_CREDIT_PRICES_JSON";
@@ -168,7 +168,7 @@ export async function evaluateStudioTextPreflight(
     [model.id],
   );
   const ctx = context.rows[0]?.ctx;
-  if (!Number.isSafeInteger(ctx) ||
+  if (typeof ctx !== "number" || !Number.isSafeInteger(ctx) ||
     ctx < reservation.inputTokenCeiling + maxTokens) {
     throw new Error("STUDIO_MODEL_CONTEXT_UNVERIFIED");
   }
