@@ -1,6 +1,6 @@
 import { getPool } from "@/db/pool";
 import {
-  StudioInputError, applyAction, demoContent, exportApproved, validateBrief,
+  StudioInputError, applyAction, demoContent, exportApproved, validateBrief, validateContent,
   type Action, type StudioRecord,
 } from "@/lib/studio/workflow";
 
@@ -82,4 +82,56 @@ export async function updateDraft(
 export async function exportDraft(userId: string, id: string, revision: number): Promise<string> {
   const record = await updateDraft(userId,id,"export",revision);
   return exportApproved(record);
+}
+
+
+/** User-triggered import. One job creates at most one DRAFT under a row lock.
+ * A retry returns the original draft and never overwrites edits/approvals. */
+export async function importMockJobAsDraft(userId:string,jobId:string,rawBrief:unknown):Promise<StudioRecord> {
+  verifyDraftId(jobId);
+  const brief=validateBrief(rawBrief);
+  const client=await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const found=await client.query<{
+      status:string;execution_mode:string;result_text:string|null;result_draft_id:string|null;
+    }>(
+      `SELECT status,execution_mode,result_text,result_draft_id
+       FROM studio_jobs WHERE id=$1 AND user_id=$2 FOR UPDATE`,
+      [jobId,userId],
+    );
+    const job=found.rows[0];
+    if(!job)throw new StudioInputError(404,"작업을 찾을 수 없습니다.");
+    if(job.status!=="succeeded"||job.execution_mode!=="mock"||!job.result_text?.trim()){
+      throw new StudioInputError(409,"저장 가능한 완료 결과가 없습니다.");
+    }
+    if(job.result_draft_id){
+      const existing=await client.query<DraftRow>(
+        `SELECT ${columns} FROM studio_drafts WHERE id=$1 AND user_id=$2 LIMIT 1`,
+        [job.result_draft_id,userId],
+      );
+      if(!existing.rows[0])throw new Error("MOCK_DRAFT_LINK_BROKEN");
+      await client.query("COMMIT");
+      return fromRow(existing.rows[0]);
+    }
+    const content=validateContent({
+      post:job.result_text.slice(0,14500),
+      hashtags:"#"+brief.brand.replace(/[^\\p{L}\\p{N}]/gu,"").slice(0,40),
+      imagePrompt:"Mock은 텍스트만 생성했습니다. 이미지 제작이나 외부 게시를 수행하지 않았습니다.",
+    });
+    const created=await client.query<DraftRow>(
+      `INSERT INTO studio_drafts(user_id,brief,content)
+       VALUES($1,$2::jsonb,$3::jsonb) RETURNING ${columns}`,
+      [userId,JSON.stringify(brief),JSON.stringify(content)],
+    );
+    if(created.rowCount!==1||!created.rows[0])throw new Error("MOCK_DRAFT_INSERT_FAILED");
+    const linked=await client.query(
+      "UPDATE studio_jobs SET result_draft_id=$3 WHERE id=$1 AND user_id=$2 AND result_draft_id IS NULL",
+      [jobId,userId,created.rows[0].id],
+    );
+    if(linked.rowCount!==1)throw new Error("MOCK_DRAFT_LINK_CONFLICT");
+    await client.query("COMMIT");
+    return fromRow(created.rows[0]);
+  }catch(error){await client.query("ROLLBACK").catch(()=>undefined);throw error;}
+  finally{client.release();}
 }
