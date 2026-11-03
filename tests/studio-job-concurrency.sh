@@ -26,7 +26,7 @@ BEGIN;
 SELECT l.id FROM usage_ledger l JOIN studio_jobs j ON j.ledger_id=l.id
  WHERE l.idem_key='race-job' FOR UPDATE OF l,j;
 SELECT pg_advisory_xact_lock(17031703);
-SELECT pg_sleep(6);
+SELECT pg_sleep(8);
 UPDATE credits SET video_balance=video_balance-30,video_reserved=video_reserved-80
  WHERE user_id=(SELECT id FROM users WHERE email='studio-race@example.invalid') AND video_reserved>=80;
 UPDATE usage_ledger SET status='settled',settled_amount=30 WHERE idem_key='race-job' AND status='held';
@@ -49,6 +49,7 @@ if [[ "$ready" != "1" ]]; then
 fi
 
 # While A is inside the critical section, a reclaimer must skip that row.
+check_started=$(date +%s)
 skipped=$("${PSQL[@]}" -c "
  SELECT count(*) FROM (
   SELECT j.id FROM usage_ledger l JOIN studio_jobs j ON j.ledger_id=l.id
@@ -56,6 +57,8 @@ skipped=$("${PSQL[@]}" -c "
     AND l.reserved_until < now() AND j.created_at < now()
    ORDER BY l.reserved_until FOR UPDATE OF l,j SKIP LOCKED LIMIT 100
  ) locked_jobs;")
+check_elapsed=$(( $(date +%s) - check_started ))
+[[ "$check_elapsed" -le 5 ]] || { echo "SKIP LOCKED blocked behind the finalizer" >&2; exit 1; }
 [[ "$skipped" == "0" ]] || { echo "SKIP LOCKED returned a job being finalized" >&2; exit 1; }
 kill -0 "$FINALIZER_PID" || { echo "Finalizer finished before SKIP LOCKED checked" >&2; exit 1; }
 wait "$FINALIZER_PID"
