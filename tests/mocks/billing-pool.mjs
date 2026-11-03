@@ -143,7 +143,7 @@ async function query(sqlInput, params = []) {
       const ledger=[...state.ledger.values()].find(x=>x.id===job.ledger_id);
       if (!ledger || ledger.status!=="held" || !["queued","running"].includes(job.status) ||
           ledger.reserved_until>=Date.now() ||
-          job.created_at.getTime()>=Date.now()-maxAgeSeconds*1000) return [];
+          job.created_at.getTime()>Date.now()-maxAgeSeconds*1000) return [];
       return [{job_id:job.id,ledger_id:ledger.id,user_id:ledger.user_id,
         modality:ledger.modality,reserved_amount:ledger.reserved_amount}];
     }).slice(0,limit);
