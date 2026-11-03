@@ -138,6 +138,8 @@ export async function reclaimExpired(limit = 100): Promise<number> {
     const expired = await client.query<{ id: string; user_id: string; reserved_amount: number; modality?: string }>(
       `SELECT id, user_id, reserved_amount, modality FROM usage_ledger
        WHERE status = 'held' AND reserved_until < now()
+         AND NOT EXISTS (SELECT 1 FROM studio_jobs j WHERE j.ledger_id = usage_ledger.id
+           AND j.status IN ('queued','running'))
        ORDER BY reserved_until FOR UPDATE SKIP LOCKED LIMIT $1`, [limit],
     );
     for (const item of expired.rows) {
