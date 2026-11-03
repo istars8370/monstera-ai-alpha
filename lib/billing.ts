@@ -100,8 +100,9 @@ export async function holdCredits(input: HoldInput): Promise<HoldResult> {
 export type SettleResult = { status: "settled"; charged: number } | { status: "reclaimed" | "missing" };
 
 // 취소와 에러에도 수신된 토큰만큼 정산한다. 정산은 중복 실행해도 1회만 반영된다.
-export async function settleCreditsInTransaction(client: BillingClient, userId: string, requestId: string, charged: number): Promise<SettleResult> {
+export async function settleCreditsInTransaction(client: BillingClient, userId: string, requestId: string, charged: number, usage?: {inputTokens:number;outputTokens:number}): Promise<SettleResult> {
   if (!validAmount(charged)) throw new Error("INVALID_SETTLEMENT");
+  if(usage && (!validAmount(usage.inputTokens)||!validAmount(usage.outputTokens))) throw new Error("INVALID_SETTLEMENT_USAGE");
   // The caller owns BEGIN/COMMIT; do not acquire a second connection.
     const result = await client.query<{ id: string; status: string; reserved_amount: number; settled_amount: number; modality?: string }>(
       "SELECT id, status, reserved_amount, settled_amount, modality FROM usage_ledger WHERE user_id = $1 AND idem_key = $2 FOR UPDATE",
@@ -125,10 +126,15 @@ export async function settleCreditsInTransaction(client: BillingClient, userId: 
       [charged, item.reserved_amount, userId],
     );
     if (updated.rowCount !== 1) throw new Error("CREDIT_INVARIANT_BROKEN");
-    const ledgerUpdated = await client.query(
-      "UPDATE usage_ledger SET status = 'settled', settled_amount = $1 WHERE id = $2",
-      [charged, item.id],
-    );
+    const ledgerUpdated = usage
+      ? await client.query(
+        "UPDATE usage_ledger SET status = 'settled', settled_amount = $1, in_tokens = $3, out_tokens = $4 WHERE id = $2",
+        [charged,item.id,usage.inputTokens,usage.outputTokens],
+      )
+      : await client.query(
+        "UPDATE usage_ledger SET status = 'settled', settled_amount = $1 WHERE id = $2",
+        [charged,item.id],
+      );
     if (ledgerUpdated.rowCount !== 1) throw new Error("LEDGER_INVARIANT_BROKEN");
     
     return { status: "settled", charged };
