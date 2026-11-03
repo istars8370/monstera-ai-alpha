@@ -1,7 +1,7 @@
 import test, {beforeEach} from "node:test";
 import assert from "node:assert/strict";
 import {holdCredits,settleCredits,reclaimExpired} from "../lib/billing.ts";
-import {resetBillingMock,seedBillingCredit,billingCredit,billingLedger,expireBillingLedger} from "./mocks/billing-pool.mjs";
+import {resetBillingMock,seedBillingCredit,billingCredit,billingWallet,billingLedger,expireBillingLedger} from "./mocks/billing-pool.mjs";
 const user="11111111-1111-4111-8111-111111111111";
 beforeEach(()=>resetBillingMock());
 const input=(modality,requestId,reserved=80)=>({
@@ -13,13 +13,13 @@ test("image holds and settlement use only the image wallet",async()=>{
  const first=await holdCredits(input("image","image-once"));
  assert.equal(first.status,"held");
  assert.deepEqual(await holdCredits(input("image","image-once")),{status:"duplicate_held"});
- assert.equal(billingCredit(user).image_reserved,80);
+ assert.equal(billingWallet(user).image_reserved,80);
  assert.equal(billingCredit(user).reserved,0);
  const settled=await settleCredits(user,"image-once",50);
  assert.deepEqual(settled,{status:"settled",charged:50});
  assert.deepEqual(await settleCredits(user,"image-once",50),settled);
- assert.equal(billingCredit(user).image_balance,50);
- assert.equal(billingCredit(user).image_reserved,0);
+ assert.equal(billingWallet(user).image_balance,50);
+ assert.equal(billingWallet(user).image_reserved,0);
  assert.equal(billingCredit(user).balance,1000);
 });
 test("video holds use 3600s TTL and are not swept before their expiration",async()=>{
@@ -28,10 +28,10 @@ test("video holds use 3600s TTL and are not swept before their expiration",async
  assert.equal((await holdCredits(input("video","long-video"))).status,"held");
  assert.ok(billingLedger(user,"long-video").reserved_until>=now+3_590_000);
  assert.equal(await reclaimExpired(),0);
- assert.equal(billingCredit(user).video_reserved,80);
+ assert.equal(billingWallet(user).video_reserved,80);
  expireBillingLedger(user,"long-video");
  assert.equal(await reclaimExpired(),1);
- assert.equal(billingCredit(user).video_reserved,0);
+ assert.equal(billingWallet(user).video_reserved,0);
  assert.equal(billingLedger(user,"long-video").status,"reclaimed");
 });
 test("insufficient modality balance never creates a held ledger row",async()=>{
@@ -45,7 +45,7 @@ test("idempotency key cannot be replayed across modalities",async()=>{
  seedBillingCredit(user,2000,0,{image_balance:1000});
  await holdCredits(input("text","same-key"));
  await assert.rejects(holdCredits(input("image","same-key")),/IDEMPOTENCY_KEY_REUSED/);
- assert.equal(billingCredit(user).image_reserved,0);
+ assert.equal(billingWallet(user).image_reserved,0);
 });
 test("invalid TTL and unknown modality are refused before DB access",async()=>{
  await assert.rejects(holdCredits({...input("video","bad"),ttlSeconds:600}),/INVALID_HOLD_TTL/);
