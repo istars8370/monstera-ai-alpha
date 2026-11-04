@@ -1,39 +1,62 @@
-# MONSTERA AI Alpha 0.1 (비공개 시험)
+# MONSTERA AI — 개인 PC 실행
 
-- 기존 T1~T12 기능을 모두 병합하지 않는다. T1 기반의 독립적 채팅 MVP이다.
-- Stripe, 크레딧, Neon, Redis, ComfyUI, 서버 동기화는 **비활성화**.
-- 비공개 접근은 Basic 인증(HTTPS 필수). 공유 링크만으로 접근할 수 없지만 전문 IAM/SSO 대체는 아니다.
-- 원문은 서버 DB/로그에 저장하지 않는다. 요청은 OpenRouter에 전달되며 제공업체 정책이 적용된다.
-- 대화는 IndexedDB에 **평문**으로 저장된다. 공용 기기/민감 대화에는 사용하지 않는다.
+현재 개발 브랜치: `feat/venice-private-alpha-20261104` (Draft PR #10).
+병합·배포·실제 유료 호출은 승인 대기입니다. 아래 데모는 비용 없이 UI를 확인합니다.
 
-## 실행
+## API 키 없이 오프라인 데모
 
-```bash
-npm install
-npm run typecheck
-npm run build
-npm run dev
-```
-
-`.env.local`에 ALPHA_BASIC_USER, ALPHA_BASIC_PASSWORD, OPENROUTER_API_KEY, ALPHA_MODEL_ID를 설정한다.
-
-## Fly 배포 (사용자 Fly 계정 필요)
+Node.js 22와 pnpm 9.15.9가 필요합니다. 저장소를 받은 뒤 실행합니다.
 
 ```bash
-fly auth login
-fly apps create YOUR_UNIQUE_APP_NAME
-# fly.toml app을 YOUR_UNIQUE_APP_NAME으로 변경
-fly secrets set ALPHA_BASIC_USER=alpha ALPHA_BASIC_PASSWORD='STRONG_RANDOM_PASSWORD' OPENROUTER_API_KEY='YOUR_KEY' ALPHA_MODEL_ID='YOUR_OPENROUTER_MODEL_ID'
-fly deploy
-curl -i https://YOUR_UNIQUE_APP_NAME.fly.dev/api/health
-curl -i https://YOUR_UNIQUE_APP_NAME.fly.dev/
+git switch feat/venice-private-alpha-20261104
+corepack pnpm install --frozen-lockfile
+corepack pnpm demo
 ```
 
-예상: /api/health 200, / 인증 없이 401, 올바른 Basic 인증 시 200.
-비용: Fly Machine 및 OpenRouter 사용량에 따라 청구될 수 있다.
+브라우저에서 http://127.0.0.1:3000 을 열고 `demo` / `demo-local-only`로 로그인합니다.
+모델 이름과 응답에 “오프라인 데모 / 실제 AI 아님”이 표시됩니다. 답변은 고정 Mock 텍스트입니다.
+모델 전환, 스트리밍, 중단, 현재 대화 비우기, 새로고침을 확인할 수 있습니다.
+종료는 터미널에서 Ctrl+C입니다. 다른 프로그램이 3000 포트를 쓰면 먼저 종료하세요.
 
-## 주의
+데모는 127.0.0.1에만 바인딩합니다. 더미 키로 설정을 덮어쓰며, 별도 preload가 Venice 요청을 가로채고 다른 외부 fetch를 차단합니다. 이 preload는 실제 앱에서 가져오지 않습니다. 데모 계정으로 외부 서비스를 열지 마세요.
 
-- 결제 기능을 비활성화했으므로 **릴리스 마이그레이션도 실행하지 않는다**.
-- 앱 레벨 사용량 제한/쿼터는 아직 없다. 외부에 인증 정보를 공유하지 말고 OpenRouter 계정의 지출 한도를 설정한다.
-- 프로세스 실행/모델 스트리밍/실제 Fly 배포는 별도로 검증해야 한다.
+## 로컬 검증
+
+```bash
+corepack pnpm typecheck
+corepack pnpm lint
+corepack pnpm test:privacy
+corepack pnpm build
+# 선택: Chromium을 설치한 QA 환경에서 브라우저 통합 테스트
+corepack pnpm exec playwright install --with-deps chromium
+corepack pnpm test:browser
+```
+
+## 실제 Venice 사용 — 유료 API 승인 후에만
+
+`.env.example`을 `.env.local`로 복사하고 로컬에서 직접 입력합니다. 실제 키·비밀번호를 채팅이나 Git에 올리지 않습니다.
+
+```dotenv
+ALPHA_BASIC_USER=your-local-name
+ALPHA_BASIC_PASSWORD=replace-with-a-long-random-password
+ALPHA_CHAT_PROVIDER=venice
+ALPHA_APP_ORIGIN=http://127.0.0.1:3000
+VENICE_API_KEY=your-approved-key
+VENICE_PRIVATE_MODEL_ID=exact-current-private-text-model-id
+VENICE_PRIVATE_MODEL_IDS=
+NEXT_TELEMETRY_DISABLED=1
+```
+
+`ALPHA_APP_ORIGIN`은 브라우저에서 여는 정확한 주소입니다. 기본 안내대로 127.0.0.1:3000을 사용하고 포트를 바꾸면 함께 수정하세요. 임의의 Host/전달 헤더를 신뢰해 허용 주소를 정하지 않습니다.
+
+여러 모델은 `VENICE_PRIVATE_MODEL_IDS=id1,id2`로 허용 목록을 설정합니다. 값이 있으면 단일 ID보다 우선합니다. 모델 ID는 현재 Venice 문서·계정에서 확인하세요. 카탈로그에서 Private로 확인되지 않으면 요청은 차단됩니다.
+
+승인 후 `corepack pnpm dev --hostname 127.0.0.1`로 시작합니다. 실제 모드는 API 요금이 발생합니다. 응답은 최대 1,024토큰, 프로세스당 분당 10회/동시 2회로 제한하지만, 정확한 지출 한도는 공급업체 계정에서 별도로 설정해야 합니다.
+
+OpenRouter는 `ALPHA_CHAT_PROVIDER=openrouter`, `OPENROUTER_API_KEY`, `ALPHA_MODEL_ID`를 명시한 경우에만 사용합니다. 이는 Venice Private와 다른 공급업체 정책이며 UI에 표시됩니다. 실패 시 공급업체를 자동 변경하지 않습니다.
+
+## 현재 제한
+
+대화 저장은 꺼져 있고 새로고침하면 현재 대화가 사라집니다. 이전 기기 기록은 자동으로 읽거나 삭제하지 않습니다. 암호화 저장·계정 격리·실제 유료 연결은 아직 완료되지 않았습니다. Private는 E2EE/TEE/로컬 실행을 뜻하지 않습니다. Stripe·크레딧·Neon·Redis 및 운영 데이터 마이그레이션은 사용하지 않습니다.
+
+배포 절차는 이번 작업 범위가 아닙니다. 외부 공개 또는 운영 배포 전에 별도 승인이 필요합니다.
