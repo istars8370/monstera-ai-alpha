@@ -68,6 +68,7 @@ export class VenicePrivateAdapter implements ProviderAdapter {
         model: req.model,
         messages: req.messages,
         stream: true,
+        store: false,
         stream_options: { include_usage: true },
         venice_parameters: {
           include_venice_system_prompt: false,
