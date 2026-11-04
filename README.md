@@ -78,3 +78,23 @@ No live Google, Neon, Upstash or AI model usage; paid charging remains disabled.
 - [v1.9 staging and credit policy decisions](docs/STAGING_ACCEPTANCE_v1.9.md)
 - [v1.9 MVP Release Gate assessment](docs/MVP_RELEASE_GATES_v1.9.md)
 - [staging and incident runbook](ALPHA_DEPLOY.md)
+
+
+## Credit hold wiring — isolated evaluation only
+
+- \`/api/chat\` requires UUID \`X-Monstera-Request-Id\` when alpha chat is enabled.
+  Repeated attempts use the same UUID and payload for idempotency.
+- \`MONSTERA_INTERNAL_CREDIT_TEST_MODE=true\` enables the real \`holdCredits\`
+  and \`settleCredits\` helpers **only when NODE_ENV is not production**.
+  The switch is FALSE by default and **production refuses it**, so this is
+  NOT paid billing activation or an approved USD-to-credit conversion.
+- The simulation treats 1 internal testing credit as 1 estimated USD-micro.
+  It estimates output cost from provider usage.outputTokens, or characters
+  if usage is absent; a fallback uses the larger output rate. Actual input
+  fees, billed-but-undelivered usage and provider invoice discrepancies
+  are NOT reconciled. This formula is NOT valid for real monetary charging.
+- Test-only manual reclaim route:
+  \`POST /api/internal/credits/reclaim\` requires a strong
+  \`MONSTERA_RECLAIM_OPERATOR_KEY\`, same-origin request, test mode and
+  nonproduction NODE_ENV; it calls the existing \`reclaimExpired\` helper.
+- No real provider or DB calls are part of this PR's tests.

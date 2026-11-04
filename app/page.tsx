@@ -79,6 +79,7 @@ export default function HomePage() {
   const [notice, setNotice] = useState("로컬 대화 기록을 불러오는 중입니다.");
   const abortRef = useRef<AbortController | null>(null);
   const messagesRef = useRef<Message[]>([]);
+  const lastAttemptRef = useRef<{ userId: string; model: string; content: string; id: string; messages: Message[] } | null>(null);
 
   const userIdRef = useRef<string | null>(null);
 
@@ -161,6 +162,7 @@ export default function HomePage() {
       if (!response.ok) throw new Error("LOGOUT_FAILED");
       userIdRef.current = null;
       messagesRef.current = [];
+      lastAttemptRef.current = null;
       setMessages([]);
       setSignedIn(false);
       setInput("");
@@ -199,7 +201,12 @@ export default function HomePage() {
     const content = input.trim();
     const initiatingUserId = userIdRef.current;
     if (!content || busy || !modelId || !signedIn || !initiatingUserId) return;
-    const history = [...messagesRef.current, { role: "user" as const, content }];
+    // 실패한 동일 메시지는 같은 멱등키와 본문으로 다시 시도한다.
+    const last = lastAttemptRef.current;
+    const retry = last?.userId === initiatingUserId && last.model === modelId && last.content === content;
+    const history = retry ? last.messages : [...messagesRef.current, { role: "user" as const, content }];
+    const requestId = retry ? last.id : crypto.randomUUID();
+    lastAttemptRef.current = { userId: initiatingUserId, model: modelId, content, id: requestId, messages: history };
     setInput("");
     setBusy(true);
     setNotice("");
@@ -215,27 +222,29 @@ export default function HomePage() {
         headers: {
           "Content-Type": "application/json",
           "X-Monstera-Expected-User": initiatingUserId,
+          "X-Monstera-Request-Id": requestId,
         },
         body: JSON.stringify({ modelId, messages: history.slice(-20) }),
         signal: abort.signal,
       });
-      if (response.status === 409) {
-        abortRef.current?.abort();
-        userIdRef.current = null;
-        messagesRef.current = [];
-        setMessages([]);
-        setSignedIn(false);
-        setInput("");
-        setModels([]);
-        setModelId("");
-        setAvailableCredits(null);
-      }
       if (!response.ok || !response.body) {
         let code = "HTTP_" + response.status;
         try {
           const payload: unknown = await response.json();
           if (payload && typeof payload === "object" && "code" in payload && typeof payload.code === "string") code = payload.code;
         } catch { /* No error JSON */ }
+        if (response.status === 409 && code === "SESSION_CHANGED") {
+          abortRef.current?.abort();
+          userIdRef.current = null;
+          messagesRef.current = [];
+          lastAttemptRef.current = null;
+          setMessages([]);
+          setSignedIn(false);
+          setInput("");
+          setModels([]);
+          setModelId("");
+          setAvailableCredits(null);
+        }
         throw new Error(code);
       }
       const reader = response.body.getReader();
@@ -258,12 +267,14 @@ export default function HomePage() {
           if (completed) break;
         }
         parser.finish();
+        if (completed) lastAttemptRef.current = null;
       } finally {
         if (!completed) await reader.cancel().catch(() => undefined);
         reader.releaseLock();
       }
     } catch (error) {
       if (userIdRef.current === initiatingUserId) {
+        if (!abort.signal.aborted) setInput(content);
         setNotice(abort.signal.aborted ? "응답을 중단했습니다. 받은 내용만 저장했습니다." :
           "응답 오류: " + (error instanceof Error ? error.message : "CHAT_FAILED"));
       }

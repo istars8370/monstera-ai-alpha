@@ -53,6 +53,7 @@ async function mockNetwork(context, state) {
       messages: data.messages,
       expected: route.request().headers()["x-monstera-expected-user"],
       actual: state.user,
+      requestId: route.request().headers()["x-monstera-request-id"],
     });
     if (state.mode === "unavailable") {
       return route.fulfill({ status: 503, json: { code: "CHAT_UNAVAILABLE" } });
@@ -84,6 +85,7 @@ test("new login, model selection, streaming chat and IndexedDB persistence", asy
   await page.getByRole("button", { name: "전송" }).click();
   await expect(page.getByText("MOCK_REPLY:hello browser alpha")).toBeVisible();
   expect(state.sent).toHaveLength(1);
+  expect(state.sent[0].requestId).toMatch(/^[0-9a-f-]{36}$/i);
   expect(state.sent[0]).toMatchObject({ modelId: modelB, expected: alice, actual: alice });
   await page.reload();
   await expect(page.getByText("MOCK_REPLY:hello browser alpha")).toBeVisible();
