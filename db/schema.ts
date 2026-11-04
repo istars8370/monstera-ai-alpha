@@ -25,9 +25,17 @@ export const credits = pgTable("credits", {
   // 차지백 시 음수 잔액은 허용하되, 신규 예약은 가용 잔액 조건으로 제한한다.
   balance: integer("balance").notNull().default(0),
   reserved: integer("reserved").notNull().default(0),
+  // Generated aliases preserve the original text wallet as the single source of truth.
+  textBalance: integer("text_balance").generatedAlwaysAs(sql`"balance"`),
+  textReserved: integer("text_reserved").generatedAlwaysAs(sql`"reserved"`),
+  imageBalance: integer("image_balance").notNull().default(0),
+  imageReserved: integer("image_reserved").notNull().default(0),
+  videoBalance: integer("video_balance").notNull().default(0),
+  videoReserved: integer("video_reserved").notNull().default(0),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   check("credits_reserved_nonnegative", sql`${table.reserved} >= 0`),
+  check("credits_modalities_nonnegative", sql`${table.imageBalance} >= 0 AND ${table.imageReserved} >= 0 AND ${table.videoBalance} >= 0 AND ${table.videoReserved} >= 0`),
 ]);
 
 export const usageLedger = pgTable("usage_ledger", {
@@ -37,6 +45,7 @@ export const usageLedger = pgTable("usage_ledger", {
   type: varchar("type", { length: 24 }).notNull().default("usage"),
   status: varchar("status", { length: 24 }).notNull().default("held"),
   model: text("model").notNull().default(""),
+  modality: varchar("modality", {length:16}).notNull().default("text"),
   inTokens: integer("in_tokens").notNull().default(0),
   outTokens: integer("out_tokens").notNull().default(0),
   cost: numeric("cost", { precision: 20, scale: 10 }).notNull().default("0"),
@@ -47,6 +56,7 @@ export const usageLedger = pgTable("usage_ledger", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   uniqueIndex("usage_ledger_user_id_idem_key_unique").on(table.userId, table.idemKey),
+  check("usage_ledger_modality_allowed", sql`${table.modality} IN ('text','image','video','audio')`),
   check("usage_ledger_reserved_nonnegative", sql`${table.reservedAmount} >= 0`),
   check("usage_ledger_settled_nonnegative", sql`${table.settledAmount} >= 0`),
   check("usage_ledger_settled_within_reserved", sql`${table.settledAmount} <= ${table.reservedAmount}`),
