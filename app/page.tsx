@@ -2,72 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ChatSseParser } from "@/lib/client-sse";
+import { deleteAllLocalChat, deleteLocalChatForUser, loadChat, lockDeviceStorage, saveChat, unlockAndMigrate } from "@/lib/client-storage";
 
 type Message = { role: "user" | "assistant"; content: string };
 type ModelChoice = { id: string; label: string; provider: string; context: number };
-const DB_NAME = "monstera-alpha-local";
-
-function openDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
-    req.onupgradeneeded = () => req.result.createObjectStore("chat");
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-async function loadChat(userId: string): Promise<Message[]> {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction("chat", "readonly");
-    const req = tx.objectStore("chat").get("messages:" + userId);
-    req.onsuccess = () => { db.close(); resolve(Array.isArray(req.result) ? req.result : []); };
-    req.onerror = () => { db.close(); reject(req.error); };
-  });
-}
-async function writeChat(messages: Message[], userId: string): Promise<void> {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction("chat", "readwrite");
-    tx.objectStore("chat").put(messages, "messages:" + userId);
-    tx.oncomplete = () => { db.close(); resolve(); };
-    tx.onerror = () => { db.close(); reject(tx.error); };
-  });
-}
-// Serialize mutations so an older asynchronous write cannot resurrect a cleared history.
-let pendingStorageMutation: Promise<void> = Promise.resolve();
-function serializeStorageMutation(action: () => Promise<void>): Promise<void> {
-  const current = pendingStorageMutation.then(action);
-  pendingStorageMutation = current.catch(() => undefined);
-  return current;
-}
-function saveChat(messages: Message[], userId: string): Promise<void> {
-  return serializeStorageMutation(() => writeChat(messages, userId));
-}
-async function deleteLocalChatForUser(userId: string): Promise<void> {
-  return serializeStorageMutation(async () => {
-    const db = await openDb();
-    return new Promise<void>((resolve, reject) => {
-      const tx = db.transaction("chat", "readwrite");
-      tx.objectStore("chat").delete("messages:" + userId);
-      tx.oncomplete = () => { db.close(); resolve(); };
-      tx.onerror = () => { db.close(); reject(tx.error); };
-      tx.onabort = () => { db.close(); reject(tx.error); };
-    });
-  });
-}
-async function deleteAllLocalChat(): Promise<void> {
-  return serializeStorageMutation(async () => {
-    const db = await openDb();
-    return new Promise<void>((resolve, reject) => {
-      const tx = db.transaction("chat", "readwrite");
-      tx.objectStore("chat").clear();
-      tx.oncomplete = () => { db.close(); resolve(); };
-      tx.onerror = () => { db.close(); reject(tx.error); };
-      tx.onabort = () => { db.close(); reject(tx.error); };
-    });
-  });
-}
-
 export default function HomePage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [models, setModels] = useState<ModelChoice[]>([]);
@@ -76,6 +14,8 @@ export default function HomePage() {
   const [signedIn, setSignedIn] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [passphrase, setPassphrase] = useState("");
+  const [unlocked, setUnlocked] = useState(false);
   const [notice, setNotice] = useState("로컬 대화 기록을 불러오는 중입니다.");
   const abortRef = useRef<AbortController | null>(null);
   const messagesRef = useRef<Message[]>([]);
@@ -105,15 +45,7 @@ export default function HomePage() {
           setAvailableCredits(balance.available);
         }
       }).catch(() => undefined);
-      try {
-        const items = await loadChat(data.userId);
-        if (cancelled || userIdRef.current !== data.userId) return;
-        messagesRef.current = items;
-        setMessages(items);
-        setNotice(data.models.length ? "" : "사용 가능한 AI 모델이 없습니다.");
-      } catch {
-        if (!cancelled) setNotice("이 계정의 로컬 기록을 불러올 수 없습니다.");
-      }
+      setNotice("로컬 기록이 잠겨 있습니다. 패스프레이즈로 잠금 해제하면 기존 기록도 암호화됩니다.");
     }).catch(() => { if (!cancelled) setNotice("인증 또는 모델 조회에 실패했습니다."); });
     const validateAccount = () => {
       const displayedUserId = userIdRef.current;
@@ -125,6 +57,9 @@ export default function HomePage() {
         if (cancelled || userIdRef.current !== displayedUserId) return;
         if (data?.userId !== displayedUserId) {
           abortRef.current?.abort();
+          lockDeviceStorage();
+          setUnlocked(false);
+          setPassphrase("");
           userIdRef.current = null;
           messagesRef.current = [];
           setMessages([]);
@@ -143,6 +78,7 @@ export default function HomePage() {
     return () => {
       cancelled = true;
       abortRef.current?.abort();
+      lockDeviceStorage();
       window.removeEventListener("focus", validateAccount);
       document.removeEventListener("visibilitychange", onVisible);
     };
@@ -152,13 +88,58 @@ export default function HomePage() {
     messagesRef.current = items;
     setMessages([...items]);
     const userId = userIdRef.current;
-    if (userId) void saveChat(items, userId).catch(() => setNotice("로컬 기록 저장 실패"));
+    if (userId && unlocked) {
+      void saveChat(items, userId).catch(() => {
+        if (userIdRef.current === userId) setNotice("암호화된 로컬 기록 저장 실패");
+      });
+    } else if (userId) {
+      setNotice("기록이 잠겨 있어 저장하지 않았습니다. 잠금 해제 후 기록을 보존하세요.");
+    }
   };
+  async function unlockLocalHistory() {
+    const userId = userIdRef.current;
+    if (!userId || busy || !signedIn || !passphrase) return;
+    try {
+      const result = await unlockAndMigrate(userId, passphrase);
+      setPassphrase("");
+      if (userIdRef.current !== userId) { lockDeviceStorage(); return; }
+      setUnlocked(true);
+      if (result.failed > 0) {
+        setNotice("암호화 마이그레이션 실패 기록 " + result.failed + "개. 원본을 보존했으므로 복구가 필요합니다.");
+        return;
+      }
+      const records = await loadChat(userId);
+      if (userIdRef.current !== userId) return;
+      messagesRef.current = records;
+      setMessages(records);
+      setNotice(result.migrated
+        ? "기존 평문 기록 " + result.migrated + "개를 암호화했습니다."
+        : "로컬 기록 잠금 해제됨");
+    } catch (error) {
+      lockDeviceStorage();
+      setUnlocked(false);
+      setPassphrase("");
+      setNotice("로컬 잠금 해제 실패: " +
+        (error instanceof Error ? error.message : "DECRYPTION_FAILED"));
+    }
+  }
+  function lockLocalHistory() {
+    lockDeviceStorage();
+    setUnlocked(false);
+    setPassphrase("");
+    messagesRef.current = [];
+    setMessages([]);
+    setInput("");
+    setNotice("로컬 기록이 잠겼습니다. 암호화 키는 메모리에서 제거했습니다.");
+  }
   async function logout() {
     if (busy) return;
     try {
       const response = await fetch("/api/auth/logout", { method: "POST" });
       if (!response.ok) throw new Error("LOGOUT_FAILED");
+      lockDeviceStorage();
+      setUnlocked(false);
+      setPassphrase("");
       userIdRef.current = null;
       messagesRef.current = [];
       setMessages([]);
@@ -187,6 +168,8 @@ export default function HomePage() {
     if (busy || !window.confirm("이 브라우저에 저장된 모든 계정의 대화 기록을 삭제하시겠습니까?")) return;
     try {
       await deleteAllLocalChat();
+      setUnlocked(false);
+      setPassphrase("");
       messagesRef.current = [];
       setMessages([]);
       setInput("");
@@ -221,6 +204,9 @@ export default function HomePage() {
       });
       if (response.status === 409) {
         abortRef.current?.abort();
+        lockDeviceStorage();
+        setUnlocked(false);
+        setPassphrase("");
         userIdRef.current = null;
         messagesRef.current = [];
         setMessages([]);
@@ -279,7 +265,7 @@ export default function HomePage() {
     <main className="mx-auto max-w-3xl p-6 md:p-12">
       <header className="mb-8">
         <h1 className="text-3xl font-bold">MONSTERA AI <span className="text-sm font-normal text-slate-500">Alpha · Private</span></h1>
-        <p className="mt-2 text-slate-500">서버에는 대화 본문을 저장하지 않습니다. 기록은 이 브라우저에 암호화되지 않은 평문으로 저장됩니다. 공용 기기에서는 저장 기록에 주의하세요.</p>
+        <p className="mt-2 text-slate-500">서버에는 대화 본문을 저장하지 않습니다. 패스프레이즈로 잠금 해제한 기록만 XChaCha20-Poly1305로 암호화해 저장합니다. 기존 평문 기록은 해당 계정에서 잠금 해제할 때 암호화됩니다.</p>
         <div className="flex gap-3 mt-4 items-center">
           {!signedIn ? (
             <a className="rounded-lg bg-emerald-700 text-white px-4 py-2" href="/api/auth/google">Google로 로그인</a>
@@ -295,6 +281,25 @@ export default function HomePage() {
             </>
           )}
         </div>
+        {signedIn && (
+          <section aria-label="로컬 기록 암호화" className="mt-3 rounded-lg border p-3">
+            <p className="text-sm">{unlocked ? "로컬 기록 잠금 해제됨" : "로컬 기록 잠김 — 키 없이 저장하지 않습니다."}</p>
+            {!unlocked ? (
+              <div className="flex gap-2 mt-2 items-center">
+                <label htmlFor="local-passphrase" className="text-sm">로컬 기록 암호</label>
+                <input id="local-passphrase" aria-label="로컬 기록 암호" type="password"
+                  autoComplete="new-password" value={passphrase}
+                  onChange={event => setPassphrase(event.target.value)}
+                  className="border rounded-lg px-3 py-2 flex-1 min-w-0" />
+                <button type="button" disabled={busy || passphrase.length < 8}
+                  onClick={() => void unlockLocalHistory()} className="rounded-lg border px-3 py-2">잠금 해제</button>
+              </div>
+            ) : (
+              <button type="button" onClick={() => lockLocalHistory()}
+                className="rounded-lg border px-3 py-2 mt-2">로컬 기록 잠그기</button>
+            )}
+          </section>
+        )}
         {signedIn && <p className="mt-2 text-sm text-slate-500">내부 크레딧 가용 잔액: {availableCredits ?? "조회 불가"} · 유료 정산 비활성화</p>}
       </header>
       <section className="space-y-4 min-h-80 mb-6" aria-label="대화">

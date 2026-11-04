@@ -1,0 +1,42 @@
+name: Offline encrypted-storage verification
+on:
+  push:
+    branches: [feat/client-encryption]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      # Argon2id crypto_pwhash는 일반 wrappers가 아닌 sumo에 있으므로
+      # 패키지 고정 변경을 pnpm 9.15.9 자체로만 생성한다.
+      - run: corepack pnpm install --lockfile-only --no-frozen-lockfile
+      - run: corepack pnpm install --frozen-lockfile
+      - run: corepack pnpm typecheck
+      - run: corepack pnpm lint
+      - run: corepack pnpm test
+      - run: corepack pnpm build
+      - name: Commit pnpm generated lockfile to feature branch only
+        run: |
+          set -eu
+          git add pnpm-lock.yaml
+          if ! git diff --cached --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "feat(crypto): lock Argon2id-capable sodium sumo dependencies"
+            git push origin HEAD:feat/client-encryption
+          fi

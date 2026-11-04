@@ -10,6 +10,14 @@ const models = [
 ];
 const baseURL = process.env.MONSTERA_TEST_HTTP_ORIGIN ?? "http://127.0.0.1:3307";
 
+
+const testingPassphrase = "isolated-test-passphrase-12345";
+async function unlock(page) {
+  await page.getByLabel("로컬 기록 암호").fill(testingPassphrase);
+  await page.getByRole("button", { name: "잠금 해제" }).click();
+  await expect(page.getByText("로컬 기록 잠금 해제됨")).toBeVisible();
+}
+
 function fakeStream(text) {
   return [
     "event: delta",
@@ -78,6 +86,7 @@ test("new login, model selection, streaming chat and IndexedDB persistence", asy
   await expect(page.getByRole("link", { name: "Google로 로그인" })).toBeVisible();
   await page.getByRole("link", { name: "Google로 로그인" }).click();
   await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await unlock(page);
   await expect(page.getByText(/내부 크레딧 가용 잔액: 20/)).toBeVisible();
   await page.getByRole("combobox", { name: "AI 모델" }).selectOption(modelB);
   await page.getByRole("textbox", { name: "메시지" }).fill("hello browser alpha");
@@ -86,6 +95,8 @@ test("new login, model selection, streaming chat and IndexedDB persistence", asy
   expect(state.sent).toHaveLength(1);
   expect(state.sent[0]).toMatchObject({ modelId: modelB, expected: alice, actual: alice });
   await page.reload();
+  await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await unlock(page);
   await expect(page.getByText("MOCK_REPLY:hello browser alpha")).toBeVisible();
   const stored = await page.evaluate(userId => new Promise((resolve, reject) => {
     const open = indexedDB.open("monstera-alpha-local");
@@ -98,7 +109,10 @@ test("new login, model selection, streaming chat and IndexedDB persistence", asy
     };
     open.onerror = () => reject(open.error);
   }), alice);
-  expect(stored.some(m => m.content === "MOCK_REPLY:hello browser alpha")).toBe(true);
+  expect(stored.v).toBe(2);
+  expect(stored.nonce.length).toBe(24);
+  expect(stored.ciphertext.length).toBeGreaterThan(16);
+  expect(JSON.stringify(stored)).not.toContain("MOCK_REPLY:hello browser alpha");
 });
 
 test("switching accounts clears old on-screen history and never submits it as another user", async ({ page, context }) => {
@@ -106,6 +120,7 @@ test("switching accounts clears old on-screen history and never submits it as an
   await mockNetwork(context, state);
   await page.goto("/");
   await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await unlock(page);
   await page.getByRole("textbox", { name: "메시지" }).fill("private Alice history");
   await page.getByRole("button", { name: "전송" }).click();
   await expect(page.getByText("MOCK_REPLY:private Alice history")).toBeVisible();
@@ -116,6 +131,7 @@ test("switching accounts clears old on-screen history and never submits it as an
   await expect(page.getByText("private Alice history")).toHaveCount(0);
   await page.reload();
   await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await unlock(page);
   await expect(page.getByText("private Alice history")).toHaveCount(0);
   await page.getByRole("textbox", { name: "메시지" }).fill("Bob writes");
   await page.getByRole("button", { name: "전송" }).click();
@@ -125,6 +141,8 @@ test("switching accounts clears old on-screen history and never submits it as an
 
   state.user = alice;
   await page.reload();
+  await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await unlock(page);
   await expect(page.getByText("MOCK_REPLY:private Alice history")).toBeVisible();
   await expect(page.getByText("Bob writes")).toHaveCount(0);
 });
@@ -134,6 +152,7 @@ test("logout clears the visible conversation but keeps per-account local history
   await mockNetwork(context, state);
   await page.goto("/");
   await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await unlock(page);
   await page.getByRole("textbox", { name: "메시지" }).fill("local private record");
   await page.getByRole("button", { name: "전송" }).click();
   await expect(page.getByText("MOCK_REPLY:local private record")).toBeVisible();
@@ -141,6 +160,8 @@ test("logout clears the visible conversation but keeps per-account local history
   await expect(page.getByRole("link", { name: "Google로 로그인" })).toBeVisible();
   await expect(page.getByText("local private record")).toHaveCount(0);
   await page.getByRole("link", { name: "Google로 로그인" }).click();
+  await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await unlock(page);
   await expect(page.getByText("MOCK_REPLY:local private record")).toBeVisible();
 });
 
@@ -149,6 +170,7 @@ test("provider failure displays a safe error; cancelled request disables its str
   await mockNetwork(context, state);
   await page.goto("/");
   await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await unlock(page);
   await page.getByRole("textbox", { name: "메시지" }).fill("expected failure");
   await page.getByRole("button", { name: "전송" }).click();
   await expect(page.getByRole("status")).toContainText("CHAT_UNAVAILABLE");
@@ -169,11 +191,13 @@ test("IndexedDB unavailability is handled without revealing other users' stored 
   });
   await page.goto("/");
   await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
-  await expect(page.getByRole("status")).toContainText("로컬 기록을 불러올 수 없습니다");
+  await page.getByLabel("로컬 기록 암호").fill(testingPassphrase);
+  await page.getByRole("button", { name: "잠금 해제" }).click();
+  await expect(page.getByRole("status")).toContainText("로컬 잠금 해제 실패");
   await page.getByRole("textbox", { name: "메시지" }).fill("no local storage");
   await page.getByRole("button", { name: "전송" }).click();
   await expect(page.getByText("MOCK_REPLY:no local storage")).toBeVisible();
-  await expect(page.getByRole("status")).toContainText("로컬 기록 저장 실패");
+  await expect(page.getByRole("status")).toContainText("기록이 잠겨 있어 저장하지 않았습니다");
 });
 
 
@@ -182,6 +206,7 @@ test("switching user midflight aborts old stream before any cross-account reply 
   await mockNetwork(context, state);
   await page.goto("/");
   await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await unlock(page);
   await page.getByRole("textbox", { name: "메시지" }).fill("Alice secret pending");
   await page.getByRole("button", { name: "전송" }).click();
   await expect(page.getByRole("button", { name: "중단" })).toBeEnabled();
@@ -191,6 +216,7 @@ test("switching user midflight aborts old stream before any cross-account reply 
   await expect(page.getByRole("link", { name: "Google로 로그인" })).toBeVisible();
   await page.reload();
   await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await unlock(page);
   await expect(page.getByText("Alice secret pending")).toHaveCount(0);
   const bobRecords = await page.evaluate(userId => new Promise((resolve, reject) => {
     const open = indexedDB.open("monstera-alpha-local");
@@ -202,7 +228,7 @@ test("switching user midflight aborts old stream before any cross-account reply 
     };
     open.onerror = () => reject(open.error);
   }), bob);
-  expect(bobRecords.every(m => !m.content.includes("Alice secret"))).toBe(true);
+  expect(JSON.stringify(bobRecords)).not.toContain("Alice secret");
 });
 
 
@@ -211,12 +237,14 @@ test("shared-device privacy: explicitly purge all account histories after confir
   await mockNetwork(context, state);
   await page.goto("/");
   await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await unlock(page);
   await page.getByRole("textbox", { name: "메시지" }).fill("Alice local privacy");
   await page.getByRole("button", { name: "전송" }).click();
   await expect(page.getByText("MOCK_REPLY:Alice local privacy")).toBeVisible();
   state.user = bob;
   await page.reload();
   await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await unlock(page);
   await page.getByRole("textbox", { name: "메시지" }).fill("Bob local privacy");
   await page.getByRole("button", { name: "전송" }).click();
   await expect(page.getByText("MOCK_REPLY:Bob local privacy")).toBeVisible();
@@ -240,6 +268,17 @@ test("shared-device privacy: explicitly purge all account histories after confir
     open.onerror = () => reject(open.error);
   }));
   expect(count).toBe(0);
+  const saltCount = await page.evaluate(() => new Promise((resolve, reject) => {
+    const open = indexedDB.open("monstera-alpha-local");
+    open.onsuccess = () => {
+      const db = open.result;
+      const count = db.transaction("meta", "readonly").objectStore("meta").count();
+      count.onsuccess = () => { db.close(); resolve(count.result); };
+      count.onerror = () => reject(count.error);
+    };
+    open.onerror = () => reject(open.error);
+  }));
+  expect(saltCount).toBe(0);
   state.user = alice;
   await page.reload();
   await expect(page.getByText("Alice local privacy")).toHaveCount(0);
@@ -251,6 +290,7 @@ test("privacy: deleting current account history removes only its IndexedDB recor
   await mockNetwork(context, state);
   await page.goto("/");
   await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await unlock(page);
   await page.getByRole("textbox", { name: "메시지" }).fill("Alice must remain");
   await page.getByRole("button", { name: "전송" }).click();
   await expect(page.getByText("MOCK_REPLY:Alice must remain")).toBeVisible();
@@ -258,6 +298,7 @@ test("privacy: deleting current account history removes only its IndexedDB recor
   state.user = bob;
   await page.reload();
   await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await unlock(page);
   await page.getByRole("textbox", { name: "메시지" }).fill("Bob must disappear");
   await page.getByRole("button", { name: "전송" }).click();
   await expect(page.getByText("MOCK_REPLY:Bob must disappear")).toBeVisible();
@@ -288,6 +329,8 @@ test("privacy: deleting current account history removes only its IndexedDB recor
   expect(records).not.toContain("messages:" + bob);
   state.user = alice;
   await page.reload();
+  await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await unlock(page);
   await expect(page.getByText("MOCK_REPLY:Alice must remain")).toBeVisible();
 });
 
@@ -297,6 +340,7 @@ test("privacy: switching accounts and logout discard the previous user's unsent 
   await mockNetwork(context, state);
   await page.goto("/");
   await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await unlock(page);
   await page.getByRole("textbox", { name: "메시지" }).fill("Alice unsent confidential draft");
 
   state.user = bob;
@@ -305,10 +349,67 @@ test("privacy: switching accounts and logout discard the previous user's unsent 
   await expect(page.getByRole("textbox", { name: "메시지" })).toHaveValue("");
   await page.reload();
   await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await unlock(page);
   await expect(page.getByRole("textbox", { name: "메시지" })).toHaveValue("");
 
   await page.getByRole("textbox", { name: "메시지" }).fill("Bob unsent draft");
   await page.getByRole("button", { name: "로그아웃" }).click();
   await expect(page.getByRole("link", { name: "Google로 로그인" })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "메시지" })).toHaveValue("");
+});
+
+
+test("legacy plaintext is preserved while locked, then migrated to encrypted v2 on unlock", async ({ page, context }) => {
+  const state = { user: alice, sent: [] };
+  await mockNetwork(context, state);
+  await page.goto("/");
+  await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  const legacy = [{ role: "user", content: "old local private text" }];
+  await page.evaluate(({ account, records }) => new Promise((resolve, reject) => {
+    const request = indexedDB.open("monstera-alpha-local", 1);
+    request.onupgradeneeded = () => request.result.createObjectStore("chat");
+    request.onsuccess = () => {
+      const db = request.result;
+      const tx = db.transaction("chat", "readwrite");
+      tx.objectStore("chat").put(records, "messages:" + account);
+      tx.oncomplete = () => { db.close(); resolve(null); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
+    };
+    request.onerror = () => reject(request.error);
+  }), { account: alice, records: legacy });
+  // 잠긴 상태에서 채팅을 전송해도 기존 평문 레코드를 덮어쓰지 않는다.
+  await page.getByRole("textbox", { name: "메시지" }).fill("not persisted while locked");
+  await page.getByRole("button", { name: "전송" }).click();
+  await expect(page.getByText("MOCK_REPLY:not persisted while locked")).toBeVisible();
+  const before = await page.evaluate(account => new Promise((resolve, reject) => {
+    const request = indexedDB.open("monstera-alpha-local", 1);
+    request.onsuccess = () => {
+      const db = request.result;
+      const get = db.transaction("chat", "readonly").objectStore("chat").get("messages:" + account);
+      get.onsuccess = () => { db.close(); resolve(get.result); };
+      get.onerror = () => reject(get.error);
+    };
+    request.onerror = () => reject(request.error);
+  }), alice);
+  expect(before).toEqual(legacy);
+  await unlock(page);
+  await expect(page.getByText("old local private text")).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("기존 평문 기록 1개를 암호화했습니다");
+  const encrypted = await page.evaluate(account => new Promise((resolve, reject) => {
+    const request = indexedDB.open("monstera-alpha-local", 2);
+    request.onsuccess = () => {
+      const db = request.result;
+      const get = db.transaction("chat", "readonly").objectStore("chat").get("messages:" + account);
+      get.onsuccess = () => { db.close(); resolve(get.result); };
+      get.onerror = () => reject(get.error);
+    };
+    request.onerror = () => reject(request.error);
+  }), alice);
+  expect(encrypted.v).toBe(2);
+  expect(encrypted.nonce.length).toBe(24);
+  expect(JSON.stringify(encrypted)).not.toContain("old local private text");
+  await page.reload();
+  await expect(page.getByRole("combobox", { name: "AI 모델" })).toBeVisible();
+  await unlock(page);
+  await expect(page.getByText("old local private text")).toBeVisible();
 });
