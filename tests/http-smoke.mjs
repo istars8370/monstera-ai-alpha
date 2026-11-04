@@ -34,17 +34,12 @@ test("HTTP: user-scoped APIs reject Basic-authenticated callers without an app s
 test("HTTP: alpha-protected Google OAuth initiation has signed state and PKCE", async () => {
   assert.equal((await fetch(base + "/api/auth/google", { redirect: "manual" })).status, 401);
   const response = await fetch(base + "/api/auth/google", { redirect: "manual", headers });
-  assert.equal(response.status, 307);
-  const target = new URL(response.headers.get("location"));
-  assert.equal(target.hostname, "accounts.google.com");
-  assert.equal(target.searchParams.get("code_challenge_method"), "S256");
-  assert.equal(target.searchParams.get("response_type"), "code");
-  assert.equal(target.searchParams.get("redirect_uri"), base + "/api/auth/google/callback");
-  assert.equal(target.searchParams.get("state")?.split(".").length, 2);
-  const cookie = response.headers.get("set-cookie") ?? "";
-  for (const name of ["monstera_oauth_state", "monstera_oauth_nonce", "monstera_oauth_verifier"]) {
-    assert.ok(cookie.includes(name), name);
-  }
+  // Production must reject an HTTP OAuth redirect URI, even when the test server
+  // is on loopback. A 307 here would weaken the production HTTPS invariant.
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).code, "AUTH_NOT_CONFIGURED");
+  assert.equal(response.headers.get("location"), null);
+  assert.equal(response.headers.get("set-cookie"), null);
 });
 
 test("HTTP: callback rejects forged OAuth state even without the Basic gate", async () => {
