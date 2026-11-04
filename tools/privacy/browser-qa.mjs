@@ -26,11 +26,11 @@ try {
   await page.getByRole("button", { name: "전송", exact: true }).click();
   assert.equal((await sent).postDataJSON().model, "demo-private-2");
   const response = await received;
-  assert.equal(response.status(), 200, "CHAT_HTTP_STATUS: " + await response.text());
-  assert.match(await response.text(), /event: done/, "CHAT_STREAM_NOT_COMPLETED");
+  assert.equal(response.status(), 200, "CHAT_HTTP_STATUS");
   await page.waitForFunction(() => document.querySelector("section[aria-label='대화']")?.textContent.includes("오프라인 Mock"));
-  await page.getByRole("button", { name: "전송", exact: true }).waitFor({ state: "visible" });
+  await page.waitForFunction(() => [...document.querySelectorAll("button")].some(button => button.textContent === "전송" && !button.disabled));
   assert.match(await page.locator("section[aria-label='대화']").innerText(), /오프라인 Mock/);
+  assert.equal(await page.getByRole("status").count(), 0, "STREAM_MUST_COMPLETE_WITHOUT_ERROR_NOTICE");
   // Force a browser-side network error; no hidden vendor request or success UI.
   await page.route("**/api/chat", route => route.abort("failed"));
   await page.getByLabel("메시지", { exact: true }).fill("FICTIONAL_NETWORK_FAILURE");
@@ -52,7 +52,7 @@ try {
   assert.equal(await page.evaluate(() => localStorage.length + sessionStorage.length), 0);
   await page.getByLabel("메시지", { exact: true }).fill("FICTIONAL_REFRESH");
   await page.getByRole("button", { name: "전송", exact: true }).click();
-  await page.getByRole("button", { name: "전송", exact: true }).waitFor({ state: "visible" });
+  await page.waitForFunction(() => [...document.querySelectorAll("button")].some(button => button.textContent === "전송" && !button.disabled));
   await page.reload(); await page.waitForFunction(() => document.querySelector("select")?.options.length === 2);
   assert.equal(await page.locator("article").count(), 0);
   await page.setViewportSize({ width: 390, height: 844 });
