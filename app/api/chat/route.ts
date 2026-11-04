@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { OpenRouterAdapter } from "@/lib/providers/openrouter";
+import { VenicePrivateAdapter } from "@/lib/providers/venice";
 import type { ChatMessage } from "@/lib/providers/types";
 
 export const runtime = "nodejs";
@@ -7,8 +8,9 @@ export const dynamic = "force-dynamic";
 
 // 알파에서는 과금과 서버 대화 저장을 사용하지 않는다.
 export async function POST(request: NextRequest): Promise<Response> {
-  const key = process.env.OPENROUTER_API_KEY;
-  const model = process.env.ALPHA_MODEL_ID;
+  const provider = process.env.ALPHA_CHAT_PROVIDER === "venice" ? "venice" : "openrouter";
+  const key = provider === "venice" ? process.env.VENICE_API_KEY : process.env.OPENROUTER_API_KEY;
+  const model = provider === "venice" ? process.env.VENICE_PRIVATE_MODEL_ID : process.env.ALPHA_MODEL_ID;
   if (!key || !model) return Response.json({ code: "NOT_CONFIGURED" }, { status: 503 });
   if (Number(request.headers.get("content-length") || 0) > 24000) return Response.json({ code: "TOO_LARGE" }, { status: 413 });
   const origin = request.headers.get("origin");
@@ -22,7 +24,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   const abort = new AbortController();
   const timeout = setTimeout(() => abort.abort(), 90000);
   request.signal.addEventListener("abort", () => abort.abort(), { once: true });
-  const adapter = new OpenRouterAdapter(key);
+  const adapter = provider === "venice" ? new VenicePrivateAdapter(key) : new OpenRouterAdapter(key);
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -43,5 +45,5 @@ export async function POST(request: NextRequest): Promise<Response> {
     },
     cancel() { abort.abort(); clearTimeout(timeout); },
   });
-  return new Response(stream, { headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no" } });
+  return new Response(stream, { headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff" } });
 }
