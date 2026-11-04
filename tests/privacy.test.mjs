@@ -185,3 +185,12 @@ test("catalog privacy change between listing and sending blocks completion", asy
   assert.match(await (await handlers.POST(request())).text(), /CHAT_FAILED/);
   assert.equal(count, 2);
 });
+test("explicit origin handles Next loopback normalization without trusting Host headers", async () => {
+  const { fetcher, calls } = mock();
+  const handlers = createChatHandlers(fetcher, { ...env, ALPHA_APP_ORIGIN: "http://127.0.0.1:3000" });
+  const allowed = await handlers.POST(request(undefined, { headers: { "content-type": "application/json", origin: "http://127.0.0.1:3000", host: "127.0.0.1:3000" } }));
+  assert.equal(allowed.status, 200); await allowed.text();
+  assert.equal((await handlers.POST(request(undefined, { headers: { "content-type": "application/json", origin: "http://evil.test", host: "evil.test", "x-forwarded-host": "evil.test" } }))).status, 403);
+  assert.equal(calls.length, 2);
+  for (const origin of ["not a URL", "file:///etc", "http://user:pass@localhost", "http://localhost/path"]) assert.equal(chatConfig({ ...env, ALPHA_APP_ORIGIN: origin }), null);
+});

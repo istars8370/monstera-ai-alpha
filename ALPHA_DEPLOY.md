@@ -40,11 +40,14 @@ corepack pnpm test:browser
 ALPHA_BASIC_USER=your-local-name
 ALPHA_BASIC_PASSWORD=replace-with-a-long-random-password
 ALPHA_CHAT_PROVIDER=venice
+ALPHA_APP_ORIGIN=http://127.0.0.1:3000
 VENICE_API_KEY=your-approved-key
 VENICE_PRIVATE_MODEL_ID=exact-current-private-text-model-id
 VENICE_PRIVATE_MODEL_IDS=
 NEXT_TELEMETRY_DISABLED=1
 ```
+
+`ALPHA_APP_ORIGIN`은 브라우저에서 여는 정확한 주소입니다. 기본 안내대로 127.0.0.1:3000을 사용하고 포트를 바꾸면 함께 수정하세요. 임의의 Host/전달 헤더를 신뢰해 허용 주소를 정하지 않습니다.
 
 여러 모델은 `VENICE_PRIVATE_MODEL_IDS=id1,id2`로 허용 목록을 설정합니다. 값이 있으면 단일 ID보다 우선합니다. 모델 ID는 현재 Venice 문서·계정에서 확인하세요. 카탈로그에서 Private로 확인되지 않으면 요청은 차단됩니다.
 

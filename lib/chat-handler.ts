@@ -50,7 +50,7 @@ export function createChatHandlers(fetcher: typeof fetch = fetch, env: NodeJS.Pr
     const config = chatConfig(env);
     if (!config) return jsonError("NOT_CONFIGURED", 503);
     const origin = request.headers.get("origin");
-    if ((origin && origin !== new URL(request.url).origin) || request.headers.get("sec-fetch-site") === "cross-site") return jsonError("FORBIDDEN", 403);
+    if ((origin && origin !== (config.origin || new URL(request.url).origin)) || request.headers.get("sec-fetch-site") === "cross-site") return jsonError("FORBIDDEN", 403);
     if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) return jsonError("INVALID_CONTENT_TYPE", 415);
     if (Number(request.headers.get("content-length") || 0) > MAX_BYTES) return jsonError("TOO_LARGE", 413);
     let payload: unknown;

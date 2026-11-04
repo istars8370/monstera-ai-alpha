@@ -21,9 +21,14 @@ try {
   assert.equal(await page.getByText("LEGACY_KEEP_FICTIONAL", { exact: true }).count(), 0);
   await page.getByLabel("모델", { exact: true }).selectOption("demo-private-2");
   await page.getByLabel("메시지", { exact: true }).fill("FICTIONAL_BROWSER_PROMPT");
+  const received = page.waitForResponse(r => r.url().endsWith("/api/chat") && r.request().method() === "POST");
   const sent = page.waitForRequest(r => r.url().endsWith("/api/chat") && r.method() === "POST");
   await page.getByRole("button", { name: "전송", exact: true }).click();
   assert.equal((await sent).postDataJSON().model, "demo-private-2");
+  const response = await received;
+  assert.equal(response.status(), 200, "CHAT_HTTP_STATUS: " + await response.text());
+  assert.match(await response.text(), /event: done/, "CHAT_STREAM_NOT_COMPLETED");
+  await page.waitForFunction(() => document.querySelector("section[aria-label='대화']")?.textContent.includes("오프라인 Mock"));
   await page.getByRole("button", { name: "전송", exact: true }).waitFor({ state: "visible" });
   assert.match(await page.locator("section[aria-label='대화']").innerText(), /오프라인 Mock/);
   // Force a browser-side network error; no hidden vendor request or success UI.
