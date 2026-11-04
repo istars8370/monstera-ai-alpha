@@ -12,9 +12,11 @@ export async function* parseSse(response: Response, signal?: AbortSignal): Async
       if (signal?.aborted) throw new Error("UPSTREAM_ABORTED");
       const { done, value } = await reader.read();
       if (done) break;
-      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+      buffer += decoder.decode(value, { stream: true });
+      buffer = buffer.replace(/\r\n/g, "\n");
       let boundary: number;
       while ((boundary = buffer.indexOf("\n\n")) >= 0) {
+        if (boundary > 131072) throw new Error("UPSTREAM_EVENT_TOO_LARGE");
         const event = buffer.slice(0, boundary);
         buffer = buffer.slice(boundary + 2);
         const data = event.split("\n").filter(line => line.startsWith("data:")).map(line => line.slice(5).trimStart()).join("\n");
@@ -29,6 +31,7 @@ export async function* parseSse(response: Response, signal?: AbortSignal): Async
         }
         if (obj.usage) yield { type: "usage", usage: { inputTokens: obj.usage.prompt_tokens ?? 0, outputTokens: obj.usage.completion_tokens ?? 0 } };
       }
+      if (buffer.length > 131072) throw new Error("UPSTREAM_EVENT_TOO_LARGE");
     }
     if (!ended) throw new Error("UPSTREAM_TRUNCATED_SSE");
     yield { type: "done" };
@@ -40,7 +43,7 @@ export class OpenRouterAdapter implements ProviderAdapter {
   async *chatStream(req: ChatRequest): AsyncIterable<Chunk> {
     const response = await this.fetcher("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST", headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: req.model, messages: req.messages, stream: true, stream_options: { include_usage: true } }), signal: req.signal,
+      body: JSON.stringify({ model: req.model, messages: req.messages, stream: true, max_tokens: 1024, stream_options: { include_usage: true } }), signal: req.signal,
     });
     yield* parseSse(response, req.signal);
   }

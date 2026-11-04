@@ -1,1 +1,45 @@
-{"name":"monstera-ai","version":"0.1.0","private":true,"packageManager":"pnpm@9.15.9","scripts":{"dev":"next dev","build":"next build","start":"next start","typecheck":"tsc --noEmit","lint":"eslint ."},"dependencies":{"next":"15.5.12","react":"^19.0.0","react-dom":"^19.0.0","@neondatabase/serverless":"^1.0.0","drizzle-orm":"^0.44.0","@upstash/redis":"^1.35.0","libsodium-wrappers":"^0.7.15","idb":"^8.0.0","lucide-react":"^0.468.0","clsx":"^2.1.1","tailwind-merge":"^3.0.0","class-variance-authority":"^0.7.1","@radix-ui/react-slot":"^1.1.0"},"devDependencies":{"typescript":"^5.7.0","@types/node":"^22.0.0","@types/react":"^19.0.0","@types/react-dom":"^19.0.0","eslint":"^9.0.0","@eslint/eslintrc":"^3.0.0","eslint-config-next":"15.5.12","tailwindcss":"^3.4.0","postcss":"^8.4.0","autoprefixer":"^10.4.0","drizzle-kit":"^0.31.0"}}
+{
+  "name": "monstera-ai",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "node --experimental-transform-types --experimental-loader ./tests/ts-loader.mjs --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.0.0",
+    "@radix-ui/react-slot": "^1.1.0",
+    "@upstash/redis": "^1.35.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "drizzle-orm": "^0.44.0",
+    "idb": "^8.0.0",
+    "libsodium-wrappers": "^0.7.15",
+    "lucide-react": "^0.468.0",
+    "next": "15.5.12",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwind-merge": "^3.0.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.0.0",
+    "@playwright/test": "1.64.1",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/ws": "^8.5.14",
+    "autoprefixer": "^10.4.0",
+    "drizzle-kit": "^0.31.0",
+    "eslint": "^9.0.0",
+    "eslint-config-next": "15.5.12",
+    "postcss": "^8.4.0",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.7.0"
+  }
+}

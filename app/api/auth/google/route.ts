@@ -1,0 +1,33 @@
+import { createHash, randomBytes } from "node:crypto";
+import { NextResponse } from "next/server";
+import { googleOAuthConfig, signOAuthState, FLOW_COOKIE_OPTIONS, OAUTH_COOKIE_NAMES } from "@/lib/google-oidc";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+export function GET(): NextResponse {
+  let config;
+  try { config = googleOAuthConfig(); }
+  catch { return NextResponse.json({ code: "AUTH_NOT_CONFIGURED" }, { status: 503 }); }
+  const stateSecret = process.env.MONSTERA_SESSION_SECRET ?? "";
+  if (Buffer.byteLength(stateSecret, "utf8") < 32) return NextResponse.json({ code: "AUTH_NOT_CONFIGURED" }, { status: 503 });
+  const state = signOAuthState(randomBytes(32).toString("base64url"), stateSecret);
+  const nonce = randomBytes(32).toString("base64url");
+  const verifier = randomBytes(32).toString("base64url");
+  const challenge = createHash("sha256").update(verifier).digest("base64url");
+  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  url.searchParams.set("client_id", config.clientId);
+  url.searchParams.set("redirect_uri", config.redirectUri);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("scope", "openid email");
+  url.searchParams.set("state", state);
+  url.searchParams.set("nonce", nonce);
+  url.searchParams.set("code_challenge", challenge);
+  url.searchParams.set("code_challenge_method", "S256");
+  const response = NextResponse.redirect(url);
+  response.headers.set("Cache-Control", "no-store");
+  response.cookies.set(OAUTH_COOKIE_NAMES.state, state, FLOW_COOKIE_OPTIONS);
+  response.cookies.set(OAUTH_COOKIE_NAMES.nonce, nonce, FLOW_COOKIE_OPTIONS);
+  response.cookies.set(OAUTH_COOKIE_NAMES.verifier, verifier, FLOW_COOKIE_OPTIONS);
+  return response;
+}

@@ -1,7 +1,9 @@
 name: CI
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -17,7 +19,8 @@ jobs:
         with:
           node-version: '22'
           cache: pnpm
-      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
+      - run: pnpm test
       - run: pnpm build

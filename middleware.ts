@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 // Fly 헬스체크만 인증 없이 허용한다. 알파 전체는 Basic 인증으로 보호한다.
 export function middleware(request: NextRequest) {
-  if (request.nextUrl.pathname === "/api/health") return NextResponse.next();
+  if (request.nextUrl.pathname === "/api/health" || request.nextUrl.pathname === "/api/auth/google/callback") return NextResponse.next();
   const user = process.env.ALPHA_BASIC_USER;
   const password = process.env.ALPHA_BASIC_PASSWORD;
   if (!user || !password) return new NextResponse("Alpha access not configured", { status: 503 });

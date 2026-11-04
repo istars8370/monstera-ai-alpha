@@ -1,39 +1,68 @@
-# MONSTERA AI Alpha 0.1 (비공개 시험)
+# MONSTERA AI — v1.8 Staging and Recovery Runbook
 
-- 기존 T1~T12 기능을 모두 병합하지 않는다. T1 기반의 독립적 채팅 MVP이다.
-- Stripe, 크레딧, Neon, Redis, ComfyUI, 서버 동기화는 **비활성화**.
-- 비공개 접근은 Basic 인증(HTTPS 필수). 공유 링크만으로 접근할 수 없지만 전문 IAM/SSO 대체는 아니다.
-- 원문은 서버 DB/로그에 저장하지 않는다. 요청은 OpenRouter에 전달되며 제공업체 정책이 적용된다.
-- 대화는 IndexedDB에 **평문**으로 저장된다. 공용 기기/민감 대화에는 사용하지 않는다.
+This is not deployment permission. Branch changes stay on integration/t1-t12.
 
-## 실행
+## Offline checks (no live credentials required)
 
-```bash
-npm install
-npm run typecheck
-npm run build
-npm run dev
-```
+    corepack enable
+    corepack pnpm install --frozen-lockfile
+    corepack pnpm typecheck
+    corepack pnpm lint
+    corepack pnpm test
+    corepack pnpm build
+    node scripts/preflight.mjs
 
-`.env.local`에 ALPHA_BASIC_USER, ALPHA_BASIC_PASSWORD, OPENROUTER_API_KEY, ALPHA_MODEL_ID를 설정한다.
+CI runs disposable PostgreSQL 16, Redis 7, Chromium mock E2E, real local HTTP
+and pinned nonroot Docker container smoke tests. They are not live Neon,
+Google, Upstash, or provider tests.
 
-## Fly 배포 (사용자 Fly 계정 필요)
+## Staging configuration checklist
 
-```bash
-fly auth login
-fly apps create YOUR_UNIQUE_APP_NAME
-# fly.toml app을 YOUR_UNIQUE_APP_NAME으로 변경
-fly secrets set ALPHA_BASIC_USER=alpha ALPHA_BASIC_PASSWORD='STRONG_RANDOM_PASSWORD' OPENROUTER_API_KEY='YOUR_KEY' ALPHA_MODEL_ID='YOUR_OPENROUTER_MODEL_ID'
-fly deploy
-curl -i https://YOUR_UNIQUE_APP_NAME.fly.dev/api/health
-curl -i https://YOUR_UNIQUE_APP_NAME.fly.dev/
-```
+- Basic alpha access gate, exact MONSTERA_PUBLIC_ORIGIN and Google OAuth callback.
+- MONSTERA_SESSION_SECRET >= 32 secure bytes; do not rotate without approval.
+- DATABASE_URL: dedicated staging Neon with TLS enabled; set
+  MONSTERA_STAGING_ONLY=true and MONSTERA_EXPECTED_TEST_DB_NAME.
+  These flags are declarations, NOT independent proof of DB ownership.
+- Separate UPSTASH_REDIS_REST_URL/TOKEN and MONSTERA_REDIS_NAMESPACE.
+- Keep MONSTERA_FREE_CHAT_ENABLED=false without approved upstream spend limits.
+- MONSTERA_ALPHA_APPROVED_MODELS and MONSTERA_ALPHA_PROVIDER_PRICES_JSON
+  must match reviewed provider/model IDs; token ceilings >= 25000 input and
+  >= 1024 output; stale prices fail closed.
+- MONSTERA_ALPHA_DAILY_REQUEST_CAP enforces request counts only.
+- MONSTERA_ALPHA_ESTIMATED_MICRO_USD_PER_DAY is an estimated, integer
+  micro-USD budget, not a proven provider invoice cap.
+- MONSTERA_PROVIDER_SPENDING_LIMIT_CONFIRMED must remain false until a
+  provider account-level spending cap has been independently verified.
+- No real OpenRouter or DeepInfra calls without explicit low-cost approval.
 
-예상: /api/health 200, / 인증 없이 401, 올바른 Basic 인증 시 200.
-비용: Fly Machine 및 OpenRouter 사용량에 따라 청구될 수 있다.
+The preflight prints configuration status ONLY and cannot verify credentials,
+database ownership or monetary provider limits.
 
-## 주의
+## Incident response rehearsal — disposable environments only
 
-- 결제 기능을 비활성화했으므로 **릴리스 마이그레이션도 실행하지 않는다**.
-- 앱 레벨 사용량 제한/쿼터는 아직 없다. 외부에 인증 정보를 공유하지 말고 OpenRouter 계정의 지출 한도를 설정한다.
-- 프로세스 실행/모델 스트리밍/실제 Fly 배포는 별도로 검증해야 한다.
+1. Stop test calls by disabling free alpha mode through an approved test config.
+2. Independently check provider spending limits and unexpected charges.
+3. Preserve request IDs and timestamps; do not store prompt bodies or secrets.
+4. Reconcile held/settled/reclaimed credits against transaction logs.
+5. Verify backups and restore into disposable DB, not production.
+6. Preserve previous container image digest and approved rollback steps.
+7. Evaluate Google subject ownership, session epochs and local IndexedDB records.
+8. Keep release blocked until operator signs off on each remaining issue.
+
+See docs/MVP_RELEASE_GATES_v1.8.md for the current release gate criteria.
+
+
+## v1.9 added isolated recovery checks
+
+The integration workflow now uses \`pg_dump\` to back up its own ephemeral
+PostgreSQL service and restores the dump into a second disposable database.
+It checks that the five application tables, uniqueness constraints, credit
+balances, and settled ledger state survive restoration. This is **NOT** a
+backup of real Neon or evidence that a production restore is safe.
+
+For provider-side cost policy and credentials, see
+\`docs/STAGING_ACCEPTANCE_v1.9.md\`. Verified provider-side caps and consent
+are required before the first real API request. The operator can review
+OpenRouter's per-key USD \`limit\` and \`limit_reset\` settings and DeepInfra's
+published spend-limit options, but these features have **not** been configured
+or verified on the MONSTERA accounts.
