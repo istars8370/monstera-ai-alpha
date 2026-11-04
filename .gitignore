@@ -17,3 +17,6 @@ monstera-ai-alpha-0.1.zip
 node_modules/
 .next/
 *.tsbuildinfo
+
+
+.privacy-test-build/

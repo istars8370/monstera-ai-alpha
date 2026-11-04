@@ -7,6 +7,7 @@ export interface ChatRequest {
   model: string;
   messages: readonly ChatMessage[];
   signal?: AbortSignal;
+  maxOutputTokens?: number;
 }
 export interface Chunk {
   type: "delta" | "usage" | "done";
@@ -26,3 +27,4 @@ export interface ProviderAdapter {
   listModels(): Promise<readonly ModelInfo[]>;
   healthCheck(): Promise<HealthStatus>;
 }
+

@@ -1,40 +1,40 @@
-# MONSTERA AI Privacy Alpha — 2026-11-04
+# MONSTERA Privacy Alpha — 2026-11-04
 
-## Goal
-Enable a daily-use privacy-first, minimally filtered AI chat with explicit Venice Private-model routing, no server-side transcript DB, and an ephemeral browser session by default.
+Status: Draft PR #10. No merge, deployment or live inference authorized.
 
-## What is actually implemented
-- `ALPHA_CHAT_PROVIDER=venice` explicitly selects the Venice server-side adapter (otherwise existing OpenRouter behavior stays unchanged).
-- Venice API credentials stay in `VENICE_API_KEY` (server environment only). Model ID is an operator-defined `VENICE_PRIVATE_MODEL_ID`.
-- Before each generation, the adapter fetches Venice's text catalog and only permits the EXACT model when `model_spec.privacy === "private"`. Missing metadata, unknown ID, provider failures and non-private tiers fail closed.
-- Fixed Venice HTTPS API host, no browser-selected upstream URL, and no automatic OpenRouter fallback on Venice failure.
-- Venice built-in system prompt is disabled; web search/scraping/citations are disabled to avoid silent retrieval and third-party data disclosure. `store:false` is requested.
-- Frontend starts without loading browser-saved transcripts or writing to IndexedDB. Local persistence is explicitly opt-in and can be disabled.
-- Chat API uses no server database to persist prompts or responses, and responds with `Cache-Control: no-store`.
+## Implemented boundary
 
-## Privacy limits — read before actual use
-- **Private does not mean E2EE, TEE, or zero network exposure.** Venice processes prompts; the Venice privacy tier and retention promises are provider policies, not independently verified cryptographic guarantees.
-- Existing API sends the selected message history to Venice on each turn. Both Venice and network infrastructure are in the trust boundary; ensure HTTPS.
-- The app's legacy optional browser IndexedDB persistence is **plaintext**. Do not enable for sensitive chats. Draft PR #6 contains separate encrypted storage, but has not been integrated or independently accepted here.
-- Basic authentication is not a multi-user security platform; local machine, extensions, browser devtools, server operators, and XSS remain risks.
-- Default ephemeral session means no persistence by this application, not no storage anywhere (browser memory, crash dumps, proxies, provider infrastructure). Existing persisted chats may remain until explicitly cleared.
-- 'Minimal filters' means no extra MONSTERA content classifier or silent provider fallback. This does not bypass provider terms or technical restrictions.
-- API key provision and live calling must be explicitly approved and funded; CI/build must never make paid calls.
+- Explicit `ALPHA_CHAT_PROVIDER=venice` or `openrouter` is required. Missing/unknown values return 503; no default vendor or automatic fallback.
+- Venice uses a fixed HTTPS host, rejects redirects, disables its built-in system prompt and web/X search, scraping and citations, and requests `store:false`.
+- Each completion rechecks the exact model ID against Venice's text catalog. Only `model_spec.privacy === "private"` and non-offline entries qualify. Unknown metadata, TEE/E2EE/anonymous tiers, lookup failure and model suffixes absent from the catalog fail closed. This is provider metadata validation, not an audit of actual retention.
+- `/api/models` exposes only the operator's allowlist; Basic authentication protects both model and chat routes. Credentials are server environment variables and are never returned.
+- Chat request cap is 24,000 actual UTF-8 bytes, at most 20 messages of 4,000 characters. Extra message properties are dropped. Only user/assistant text is accepted.
+- UI shows the active provider and model, and discloses the recent-message window. Older history is omitted from requests to fit the byte limit; long assistant messages contribute their final 4,000 characters. This is context selection, not persistent storage or summarization.
+- Responses are capped at 1,024 requested output tokens. A process-local guard allows at most two active streams and ten generation requests per minute. These are coarse single-process controls, not a dollar budget or distributed quota. Configure provider-side spend limits before live use.
+- Completion timeout is 90 seconds; catalog timeout is 15 seconds. Cancellation reaches upstream fetch and releases readers; errors returned to the browser are fixed codes rather than provider bodies, keys or prompts.
+- No application transcript DB or transcript logs. Success and error API responses use no-store. Build-time framework telemetry can be disabled with `NEXT_TELEMETRY_DISABLED=1`.
 
-## Local evaluation (not yet run in a real account)
-1. Use existing `ALPHA_DEPLOY.md` local setup and Basic auth. Set `ALPHA_CHAT_PROVIDER=venice`, `VENICE_API_KEY`, `VENICE_PRIVATE_MODEL_ID` in local-only `.env.local` (never commit actual secrets).
-2. Select a Venice `text` model that currently advertises `model_spec.privacy: "private"`. Confirm availability and limits through official docs and account.
-3. Run `pnpm typecheck && pnpm lint && pnpm build`; launch locally and verify response with **fictional text only**, after explicit paid API approval.
-4. Negative tests: unset key -> 503; unknown/non-private model -> no completion request; provider lookup failure -> no fallback; no key leaked in browser or logs.
-5. Confirm zero browser transcript storage by default and explicit opt-in behavior; test record removal and a full browser refresh.
-6. Independent QA: check HTTP request counts, streaming SSE, abort, private model catalog response, cost and provider billing receipts.
+## Storage decision and PR #6 reuse assessment
 
-## Explicitly NOT done
-- No E2EE or verified provider no-retention audit.
-- No user-encrypted local storage in this branch.
-- No real Venice API response or billing test.
-- No deployment, main merge, production credentials, automatic data transmission, background work, or policy-bypass mechanisms.
+PR #6 at `c8dd7a311407611e9c4dca0a3e8b9ee1bff951d3` was reviewed. It uses Argon2id (3 operations, 64 MiB), XChaCha20-Poly1305, IndexedDB v2, per-user AAD and passphrase locking. It is based on `integration/t1-t12`, with account identity/auth APIs absent from this main-based alpha. Sumo sodium dependency and a different lockfile are also required. Blindly copying it would not establish account isolation or safe legacy migration.
 
-Official Venice docs:
+Therefore encrypted persistence is **NOT VERIFIED / not integrated** here. The legacy plaintext persistence UI and all automatic IndexedDB access are removed. New chats exist only in browser memory; refresh clears them. Existing IndexedDB databases are never automatically opened, read, overwritten, migrated or deleted. “현재 대화 비우기” clears memory only. Legacy records can still be present on the device; this is not secure erasure. Encryption, opt-in migration and account isolation remain a separate completion gate.
+
+The existing `ChatSseParser` from the PR #6 branch is reused without importing its auth, storage or Studio code. Shared upstream parsing is fixed for split CRLF and pending-read cancellation.
+
+## Privacy claims and remaining limits
+
+Private is a provider contractual/policy tier. It is not E2EE, a verified TEE, client-only inference or proof of no retention. The MONSTERA server and selected provider process plaintext prompts. Hosting/proxy logs, browser memory, extensions, XSS, crash dumps and local operators remain trust boundaries. Do not use real customer/business personal data for QA. Basic auth is single-user access control, not multi-user account isolation; use loopback locally or HTTPS on an approved host.
+
+No extra MONSTERA content classifier is added. Model/provider restrictions still apply. No policy-bypass guarantee is offered.
+
+## Verification and exact-head gate
+
+`pnpm test:privacy` runs offline TypeScript-compiled Node tests with injected fetch mocks. CI runs typecheck, lint, privacy tests and production build on the same checkout. It does not call the Venice API or provision secrets. Browser QA uses the explicit loopback Mock demo and fictional messages. CI installs Chromium and runs `pnpm test:browser` for model selection, streaming, network failure, cancel, clear, refresh, legacy-record preservation, web-storage inactivity, mobile overflow and log/key checks. This is automated QA, not independent human acceptance.
+
+Encryption roundtrip/deletion, live model availability, real inference quality/latency/billing and independent human QA are not covered. CI success must be checked for the final commit SHA, not the prior `545c54d` or an unrelated merge commit. No merge/deployment until CEO approval.
+
+Official API documentation reviewed on 2026-11-04:
 - https://docs.venice.ai/api-reference/endpoint/models/list
 - https://docs.venice.ai/api-reference/endpoint/chat/completions
+- https://venice.ai/privacy

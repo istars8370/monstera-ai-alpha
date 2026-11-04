@@ -21,9 +21,10 @@ function parsePrivateTextModels(payload: unknown): PrivateModel[] {
     const model = item as {
       id?: unknown;
       type?: unknown;
-      model_spec?: { name?: unknown; privacy?: unknown };
+      model_spec?: { name?: unknown; privacy?: unknown; offline?: unknown };
     };
     if (model.type !== "text" || model.model_spec?.privacy !== "private") continue;
+    if (model.model_spec.offline === true) continue;
     if (typeof model.id !== "string" || !model.id || model.id.length > 150) continue;
     const name = typeof model.model_spec.name === "string" && model.model_spec.name
       ? model.model_spec.name.slice(0, 160) : model.id;
@@ -39,6 +40,7 @@ export class VenicePrivateAdapter implements ProviderAdapter {
   ) {}
 
   private async privateModels(signal?: AbortSignal): Promise<PrivateModel[]> {
+    signal = signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000);
     const response = await this.fetcher(BASE_URL + "/models?type=text", {
       method: "GET",
       headers: { Authorization: "Bearer " + this.apiKey },
@@ -69,12 +71,14 @@ export class VenicePrivateAdapter implements ProviderAdapter {
         messages: req.messages,
         stream: true,
         store: false,
+        max_completion_tokens: req.maxOutputTokens ?? 1024,
         stream_options: { include_usage: true },
         venice_parameters: {
           include_venice_system_prompt: false,
           enable_web_search: "off",
           enable_web_scraping: false,
           enable_web_citations: false,
+          enable_x_search: false,
         },
       }),
       cache: "no-store",
@@ -98,3 +102,4 @@ export class VenicePrivateAdapter implements ProviderAdapter {
     }
   }
 }
+

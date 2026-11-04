@@ -6,8 +6,9 @@ const compat = new FlatCompat({ baseDirectory: dirname(fileURLToPath(import.meta
 
 // Next.js generates this file; do not lint or hand-edit it.
 const config = [
-  { ignores: ["next-env.d.ts", ".next/**"] },
+  { ignores: ["next-env.d.ts", ".next/**", ".privacy-test-build/**"] },
   ...compat.extends("next/core-web-vitals", "next/typescript"),
 ];
 
 export default config;
+
