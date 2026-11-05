@@ -37,6 +37,7 @@ export async function authenticatedUser(request: NextRequest): Promise<Authentic
     [token.sub],
   );
   const user = result.rows[0];
-  if (!user || user.session_epoch !== token.epoch || !user.email_verified_at || !user.google_sub || !allowedTiers.has(user.tier as Tier)) return null;
-  return { id: user.id, tier: user.tier as Tier };
+  if (!user || user.session_epoch !== token.epoch || !user.email_verified_at || !user.google_sub) return null;
+  // DB에 예기치 않은 티어 값이 있어도 권한은 free로 제한한다.
+  return { id: user.id, tier: allowedTiers.has(user.tier as Tier) ? user.tier as Tier : "free" };
 }

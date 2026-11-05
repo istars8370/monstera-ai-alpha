@@ -1,4 +1,4 @@
-import { boolean, integer, numeric, pgTable, primaryKey, timestamp, uuid, varchar, text, customType, uniqueIndex, check } from "drizzle-orm/pg-core";
+import { boolean, integer, numeric, pgTable, primaryKey, timestamp, date, uuid, varchar, text, customType, uniqueIndex, check } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 // 서버는 대화 본문을 저장하지 않는다. 동기화 데이터는 암호문만 저장한다.
@@ -13,12 +13,22 @@ export const users = pgTable("users", {
   email: varchar("email", { length: 320 }).notNull().unique(),
   // Google OIDC sub is the immutable account identifier. Existing email-only users are NOT auto-linked.
   googleSub: varchar("google_sub", { length: 255 }).unique(),
+  walletAddress: varchar("wallet_address", { length: 64 }).unique(),
+  walletVerifiedAt: timestamp("wallet_verified_at", { withTimezone: true }),
+  lastGrantDay: date("last_grant_day"),
   tier: varchar("tier", { length: 32 }).notNull().default("free"),
   emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
   sessionEpoch: integer("session_epoch").notNull().default(0),
   stripeCustomerId: varchar("stripe_customer_id", { length: 128 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => [
+  check("users_tier_allowed", sql`${table.tier} IN ('free', 'creator', 'studio')`),
+]);
+
+export const walletGrants = pgTable("wallet_grants", {
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  day: date("day").notNull(),
+}, table => [primaryKey({ columns: [table.userId, table.day] })]);
 
 export const credits = pgTable("credits", {
   userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),

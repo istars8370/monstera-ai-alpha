@@ -15,6 +15,13 @@
       "when": 1793535382714,
       "tag": "0001_light_skreet",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793602078515,
+      "tag": "0002_gifted_wolfpack",
+      "breakpoints": true
     }
   ]
 }
