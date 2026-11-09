@@ -7,12 +7,18 @@ export async function* parseSse(response: Response, signal?: AbortSignal): Async
   const decoder = new TextDecoder();
   let buffer = "";
   let ended = false;
+  let textLength = 0;
+  const onAbort = () => { void reader.cancel().catch(() => undefined); };
+  signal?.addEventListener("abort", onAbort, { once: true });
   try {
     while (!ended) {
       if (signal?.aborted) throw new Error("UPSTREAM_ABORTED");
       const { done, value } = await reader.read();
+      if (signal?.aborted) throw new Error("UPSTREAM_ABORTED");
       if (done) break;
-      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+      buffer += decoder.decode(value, { stream: true });
+      buffer = buffer.replace(/\r\n/g, "\n");
+      if (buffer.length > 1024 * 1024) throw new Error("UPSTREAM_SSE_TOO_LARGE");
       let boundary: number;
       while ((boundary = buffer.indexOf("\n\n")) >= 0) {
         const event = buffer.slice(0, boundary);
@@ -25,14 +31,18 @@ export async function* parseSse(response: Response, signal?: AbortSignal): Async
         const obj = parsed as { error?: unknown; choices?: Array<{ delta?: { content?: unknown } }>; usage?: { prompt_tokens?: number; completion_tokens?: number } };
         if (obj.error) throw new Error("UPSTREAM_STREAM_ERROR");
         for (const choice of obj.choices ?? []) {
-          if (typeof choice.delta?.content === "string") yield { type: "delta", text: choice.delta.content };
+          if (typeof choice.delta?.content === "string") {
+            textLength += choice.delta.content.length;
+            if (textLength > 131072) throw new Error("UPSTREAM_RESPONSE_TOO_LARGE");
+            yield { type: "delta", text: choice.delta.content };
+          }
         }
         if (obj.usage) yield { type: "usage", usage: { inputTokens: obj.usage.prompt_tokens ?? 0, outputTokens: obj.usage.completion_tokens ?? 0 } };
       }
     }
     if (!ended) throw new Error("UPSTREAM_TRUNCATED_SSE");
     yield { type: "done" };
-  } finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
+  } finally { signal?.removeEventListener("abort", onAbort); await reader.cancel().catch(() => undefined); reader.releaseLock(); }
 }
 
 export class OpenRouterAdapter implements ProviderAdapter {
@@ -40,7 +50,7 @@ export class OpenRouterAdapter implements ProviderAdapter {
   async *chatStream(req: ChatRequest): AsyncIterable<Chunk> {
     const response = await this.fetcher("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST", headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: req.model, messages: req.messages, stream: true, stream_options: { include_usage: true } }), signal: req.signal,
+      body: JSON.stringify({ model: req.model, messages: req.messages, stream: true, max_tokens: req.maxOutputTokens ?? 1024, stream_options: { include_usage: true } }), signal: req.signal, cache: "no-store", redirect: "error",
     });
     yield* parseSse(response, req.signal);
   }
@@ -56,3 +66,4 @@ export class OpenRouterAdapter implements ProviderAdapter {
     catch { return { healthy: false, latencyMs: Date.now() - start }; }
   }
 }
+
