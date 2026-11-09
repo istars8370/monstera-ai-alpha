@@ -2,7 +2,8 @@ import { parseSse } from "./openrouter";
 import type { ChatRequest, Chunk, HealthStatus, ModelInfo, ProviderAdapter } from "./types";
 
 // Single fixed upstream endpoint. Never forward a client-supplied URL or API key.
-// Venice's "private" tier is policy-based zero retention, NOT end-to-end encryption.
+// Venice describes Private as contract-based prompt/output non-retention.
+// This adapter validates catalog metadata only; it does not verify retention or implement E2EE.
 const BASE_URL = "https://api.venice.ai/api/v1";
 
 type PrivateModel = ModelInfo & { privacy: "private" };
@@ -70,6 +71,8 @@ export class VenicePrivateAdapter implements ProviderAdapter {
         model: req.model,
         messages: req.messages,
         stream: true,
+        // Venice accepts store for OpenAI compatibility but does not use it.
+        // Sending store:false does not enforce or verify non-retention.
         store: false,
         max_completion_tokens: req.maxOutputTokens ?? 1024,
         stream_options: { include_usage: true },

@@ -5,7 +5,7 @@ Status: Draft PR #10. No merge, deployment or live inference authorized.
 ## Implemented boundary
 
 - Explicit `ALPHA_CHAT_PROVIDER=venice` or `openrouter` is required. Missing/unknown values return 503; no default vendor or automatic fallback.
-- Venice uses a fixed HTTPS host, rejects redirects, disables its built-in system prompt and web/X search, scraping and citations, and requests `store:false`.
+- Venice uses a fixed HTTPS host, rejects redirects, disables its built-in system prompt and web/X search, scraping and citations, and sends `store:false` for compatibility. Venice accepts `store` for OpenAI compatibility but does not use it. Sending `store:false` does not enforce or verify non-retention.
 - Each completion rechecks the exact model ID against Venice's text catalog. Only `model_spec.privacy === "private"` and non-offline entries qualify. Unknown metadata, TEE/E2EE/anonymous tiers, lookup failure and model suffixes absent from the catalog fail closed. This is provider metadata validation, not an audit of actual retention.
 - `/api/models` exposes only the operator's allowlist; Basic authentication protects both model and chat routes. Credentials are server environment variables and are never returned.
 - `ALPHA_APP_ORIGIN` pins the allowed browser origin (the loopback demo uses `http://127.0.0.1:3000`). This avoids Next host normalization rejecting legitimate requests, without trusting arbitrary Host/forwarded headers. Missing configuration falls back to the request URL origin; malformed origin settings fail closed.
@@ -19,7 +19,7 @@ Status: Draft PR #10. No merge, deployment or live inference authorized.
 
 PR #6 at `c8dd7a311407611e9c4dca0a3e8b9ee1bff951d3` was reviewed. It uses Argon2id (3 operations, 64 MiB), XChaCha20-Poly1305, IndexedDB v2, per-user AAD and passphrase locking. It is based on `integration/t1-t12`, with account identity/auth APIs absent from this main-based alpha. Sumo sodium dependency and a different lockfile are also required. Blindly copying it would not establish account isolation or safe legacy migration.
 
-Therefore encrypted persistence is **NOT VERIFIED / not integrated** here. The legacy plaintext persistence UI and all automatic IndexedDB access are removed. New chats exist only in browser memory; refresh clears them. Existing IndexedDB databases are never automatically opened, read, overwritten, migrated or deleted. “현재 대화 비우기” clears memory only. Legacy records can still be present on the device; this is not secure erasure. Encryption, opt-in migration and account isolation remain a separate completion gate.
+Therefore encrypted persistence is **NOT VERIFIED / not integrated** here. The legacy plaintext persistence UI and all automatic IndexedDB access are removed. The UI retains new chat history in browser memory without application-managed persistent storage; refresh clears the UI history. Submitted context is also processed by the MONSTERA server and selected provider. Existing IndexedDB databases are never automatically opened, read, overwritten, migrated or deleted. “현재 대화 비우기” clears memory only. Legacy records can still be present on the device; this is not secure erasure. Encryption, opt-in migration and account isolation remain a separate completion gate.
 
 The existing `ChatSseParser` from the PR #6 branch is reused without importing its auth, storage or Studio code. Shared upstream parsing is fixed for split CRLF and pending-read cancellation.
 

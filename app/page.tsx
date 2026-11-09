@@ -85,9 +85,9 @@ export default function HomePage() {
   return <main className="mx-auto max-w-3xl p-4 md:p-10">
     <header className="mb-6">
       <h1 className="text-3xl font-bold">MONSTERA AI <span className="text-sm font-normal text-slate-500">Privacy Alpha</span></h1>
-      <p className="mt-2 text-slate-600">대화 저장 꺼짐 · 서버 대화 DB 없음 · 새로고침 시 현재 대화 소멸</p>
+      <p className="mt-2 text-slate-600">이 앱은 새 대화를 기기에 영구 저장하지 않습니다. MONSTERA 앱의 대화 DB는 사용하지 않습니다.</p>
       <div className="mt-4 rounded-xl border p-4 space-y-3">
-        <p className="text-sm">공급업체: <strong>{catalog?.provider || "확인 중"}</strong> · 처리 방식: {catalog?.privacy === "private" ? "Private (제공업체의 미보관 정책)" : catalog ? "선택 공급업체 정책 적용" : "미확인"}</p>
+        <p className="text-sm">공급업체: <strong>{catalog?.provider || "확인 중"}</strong> · 처리 방식: {catalog?.privacy === "private" ? "Private (Venice가 분류한 정책 기반 등급 · 실제 미보관 여부 미검증)" : catalog ? "선택 공급업체 정책 적용" : "미확인"}</p>
         <div className="flex flex-wrap items-center gap-2">
           <label htmlFor="model" className="text-sm">모델</label>
           <select id="model" value={model} disabled={busy || loading || !catalog?.models.length} onChange={e => setModel(e.target.value)} className="min-w-0 flex-1 rounded-lg border p-2 text-slate-900">
